@@ -10,4 +10,4 @@
 - Added "Portability constraints" section to PORTING_PLAN.md (PC first; DSi/BlocksDS then 3DS end targets; four platform interfaces Render/Audio/Input/Storage; no ImGui/OpenGL/SDL/filesystem in core; avoid iostream/exceptions/heap churn; fixed-size arrays; doubles out of per-frame paths; byte-compatible base64 save format)
 - Reviewed cpp/ skeleton for constraint violations; logged them as tasks in HANDOFF.md
 - Updated HANDOFF.md next task to respect constraints (split core from platform via four interfaces)
-- Commit hash: (recorded after commit)
+- Commit hash: 51ace206e48263932fc69c8381e452a97d4b0717
