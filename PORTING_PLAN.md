@@ -152,6 +152,20 @@ Cookie-Clicker/
 
 ---
 
+## Portability constraints (PC first, DSi / 3DS end targets)
+
+The end targets are Nintendo DSi (DSi mode, BlocksDS) and later 3DS. The PC build is a development host, not the final platform. The following constraints apply to the **game core** (economy, buildings, upgrades, achievements, save/load, minigame logic):
+
+- **No platform dependencies in the core.** Core `.h` / `.cpp` files must NOT `#include` or call ImGui, OpenGL, SDL, or any filesystem API (`<fstream>`, `<filesystem>`, `fopen`, `stat`, `opendir`, etc.). The core must compile on a hosted DSi/3DS toolchain with only the C++ standard library.
+- **Four thin platform interfaces only.** The core talks to the platform exclusively through: `Render`, `Audio`, `Input`, `Storage`. ImGui/OpenGL/SDL live only in the PC backend. Each interface is a small pure-C++ abstract header the core depends on; the PC backend provides the implementation.
+- **Minimize heap and streams.** Avoid `<iostream>` / `<sstream>` and exceptions in the core. Prefer fixed-size arrays over `std::vector` / `std::map` where counts are bounded (buildings, upgrades, achievements, buffs, shimmers, particles). Accept `std::string` only for save/load text and names; avoid per-frame heap churn.
+- **Keep doubles out of per-frame paths.** Cookie counts and CpS may be `double` for save-format fidelity, but per-frame simulation (`Logic(dt)`) should avoid `double` where fixed-point or integer math suffices, to stay friendly to DSi's lack of an FPU.
+- **Save format stays byte-compatible.** The base64 pipe/semicolon/`!END!`/JS-`escape()` save format must remain identical to the browser so DSi/3DS/PC/browser can all read each other's saves. `Storage` handles read/write of that byte string; the core only produces/consumes the string.
+
+These constraints are a design target for refactor work; the current `cpp/` skeleton predates them and violates several — see HANDOFF.md for the violation task list.
+
+---
+
 ## 4. Subsystem porting notes
 
 ### Save / Load (highest fidelity requirement)

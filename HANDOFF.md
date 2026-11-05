@@ -1,7 +1,7 @@
 # Handoff
 
 ## Next task (one scoped item)
-Implement `Game::calculateGains()` fully so purchasing a building raises `cookiesPs` and the cookie count grows over time. Scope: building CpS only (no upgrades/buffs/heavenly power yet). Wire it into `Game::logic()` so `dt` accumulates cookies each frame.
+Split core from platform: create four pure-C++ abstract platform interfaces (`Render`, `Audio`, `Input`, `Storage`) and make the game core depend ONLY on them — no `#include` or calls to ImGui, OpenGL, SDL, or filesystem APIs in any core `.h`/`.cpp`. PC backend (`main.cpp`, SDL2, ImGui stubs) implements the interfaces. This respects the DSi/3DS portability constraints before any gameplay code is added.
 
 ## Exact build/test commands
 ```
@@ -43,6 +43,18 @@ Unverified:
 - Save/load compatibility with browser-made saves (C++ → browser and browser → C++)
 - PRNG parity with David Bau seedrandom (std::mt19937 used instead, UNVERIFIED for dungeons/mutations/lumps)
 - `double` cookie math matching JS exactly over long runs (UNVERIFIED)
+
+## Portability constraint violations (tasks — do not fix now, just aware)
+
+The current `cpp/` skeleton predates the DSi/3DS constraints and violates them. These are listed as tasks; do NOT fix as part of the next scoped item.
+
+- `cpp/Game.h` / `cpp/Game.cpp`: uses `std::vector`, `std::map`, `std::string`, `std::function` (heap containers) in core; uses `double` in per-frame `logic()` / `mouseCps()` / `calculateGains()`.
+- `cpp/Building.h` / `cpp/Building.cpp`: uses `std::vector`, `std::string`, `std::function` (heap) in core.
+- `cpp/Upgrade.h/.cpp`, `cpp/Achievement.h/.cpp`, `cpp/Buff.h/.cpp`: use `std::string`, `std::function` (heap) in core.
+- `cpp/SaveLoad.h/.cpp`: core save/load uses `std::ostringstream` (stream/heap) and `std::vector<char>`; acceptable only because save/load is not per-frame, but still violates "avoid streams" — prefer fixed buffers.
+- `cpp/Types.h`: `now_ms()` uses `std::chrono::system_clock` (host wall clock) — fine for PC, but `Storage`/platform should supply time on DSi/3DS.
+- `cpp/main.cpp`: includes SDL2 directly — OK, this is the PC backend, NOT core.
+- `cpp/Render.h/.cpp`, `cpp/Audio.h/.cpp`, `cpp/Assets.h/.cpp`: platform stubs — OK, these are the PC backend, NOT core. They must become the `Render`/`Audio`/`Input`/`Storage` implementations.
 
 ## Decisions already made (do not redo)
 - All cookie math uses C++ `double` to match JS IEEE-754 behavior

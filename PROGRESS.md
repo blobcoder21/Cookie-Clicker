@@ -6,4 +6,8 @@
 - Verified CMake configures: cmake -S cpp -B build -DCMAKE_BUILD_TYPE=Release (SDL2=YES, OpenGL found, ImGui=OFF stub)
 - Verified build succeeds: cmake --build build -j (Built target cookie_clicker, exit 0)
 - Verified executable runs: timeout 3 ./build/cookie_clicker (exit 0, window opens and fixed-timestep loop runs)
-- Commit hash: a448f69a393573570569f6976c0909c5653258c6
+- Commit hash: a448f69a393573570569f6976c0909c5653258c6 (prior session)
+- Added "Portability constraints" section to PORTING_PLAN.md (PC first; DSi/BlocksDS then 3DS end targets; four platform interfaces Render/Audio/Input/Storage; no ImGui/OpenGL/SDL/filesystem in core; avoid iostream/exceptions/heap churn; fixed-size arrays; doubles out of per-frame paths; byte-compatible base64 save format)
+- Reviewed cpp/ skeleton for constraint violations; logged them as tasks in HANDOFF.md
+- Updated HANDOFF.md next task to respect constraints (split core from platform via four interfaces)
+- Commit hash: (recorded after commit)
