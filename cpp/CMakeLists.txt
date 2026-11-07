@@ -10,6 +10,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # ---------------------------------------------------------------------------
 find_package(SDL2 REQUIRED)
 find_package(OpenGL REQUIRED)
+find_package(PNG REQUIRED)
+find_package(Freetype REQUIRED)
 
 # ---------------------------------------------------------------------------
 # Optional: SDL2_mixer (audio). If missing, Audio.cpp stub is used.
@@ -56,6 +58,7 @@ set(SOURCES
     Assets.cpp
     Audio.cpp
     Render.cpp
+    EmbeddedAssets.cpp
 )
 
 set(HEADERS
@@ -78,6 +81,7 @@ set(HEADERS
     Assets.h
     Audio.h
     Render.h
+    EmbeddedAssets.h
 )
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
@@ -103,7 +107,9 @@ if(USE_IMGUI)
     target_compile_definitions(cookie_clicker PRIVATE IMGUI_IMPL_OPENGL_LOADER_GL3W)
 endif()
 
-target_link_libraries(cookie_clicker PRIVATE SDL2::SDL2 OpenGL::GL)
+target_link_libraries(cookie_clicker PRIVATE SDL2::SDL2 OpenGL::GL
+                                                    ${PNG_LIBRARY} ${FREETYPE_LIBRARIES})
+target_include_directories(cookie_clicker PRIVATE ${PNG_INCLUDE_DIR} ${FREETYPE_INCLUDE_DIRS})
 
 if(USE_SDL2_MIXER)
     target_link_libraries(cookie_clicker PRIVATE SDL2_mixer::SDL2_mixer)

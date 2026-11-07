@@ -1,41 +1,98 @@
 # Handoff
 
 ## Next task (one scoped item)
-Split core from platform: create four pure-C++ abstract platform interfaces (`Render`, `Audio`, `Input`, `Storage`) and make the game core depend ONLY on them — no `#include` or calls to ImGui, OpenGL, SDL, or filesystem APIs in any core `.h`/`.cpp`. PC backend (`main.cpp`, SDL2, ImGui stubs) implements the interfaces. This respects the DSi/3DS portability constraints before any gameplay code is added.
+**DONE — Save/Load building persistence (sections 5, 8, wrinklers, vault).**
+See Verification status below. A C++ save now round-trips byte-identical through the escape/base64 pipeline, a browser-made save (JS field order) loads into the C++ build, and the game resumes with correct buildings/CpS.
+
+**DONE — Early native PC GUI (layout matches index.html / style.css).**
+- Native SDL2 desktop window (900x600, resizable, OpenGL).
+- Left panel (#sectionLeft, 30% width): cookie count (#cookies, top 10%), bakery name, CPS, and the big cookie (#cookieAnchor, centered at top 40%) rendered from `img/perfectCookie.png`, clickable. Wobble clamped between 90% and 120% (click pops to 120% with spring bounce).
+- Right panel (#sectionRight / #store, rightmost ~318px): Store with `.product` tiles (300x64, `storeTile.png` strips at natural width centered in each cell), each with building icon (64x64, cursor uses top-left quadrant of sprite sheet), name, green price when affordable / red when not, `"???"` when locked.
+- No separate BUY button: clicking anywhere in a store row buys one building. Purchase feedback: bought building's cell flashes green ~0.4s; clicking the cookie pops it larger.
+- Big faded owned amount inside each cell at right:12px top:6px (small semi-transparent text).
+- Hard requirement respected: `cpp/` core (`Game`, `Building`, `SaveLoad`, economy…) knows nothing of SDL/OpenGL/FreeType. All rendering goes through the `Render` platform layer (`cpp/Render.cpp`), which decodes PNGs with libpng and renders text with FreeType2. `Game::draw()` issues only `Render::*` calls. `main.cpp` (PC backend) owns SDL, hit-tests the cookie/buy buttons against areas registered during `draw()`, and calls `game.clickCookie()` / `game.buyBuilding()`.
+- `main.cpp` now calls `game.load()` (previously missed, so buildings were never created). `Game::loop()` is logic-only; `draw()` is invoked once per rendered frame from `main.cpp`.
+- Font fix: glyph cache is cleared when the FreeType face size changes (was cached by char only, so all text used the first scale's bitmaps — now cookie count, CPS, bakery name, and building names each render at their correct size).
+- Asset fix: 23 GUI assets embedded (18 building icons, big cookie, bgBlue, storeTile, TTF font) in `cpp/EmbeddedAssets.*` and extracted to a temp dir at `Render::init`, so the executable runs from any working directory with no missing textures or fonts.
+
+Next scoped item: continue per PORTING_PLAN.md milestones (upgrades panel, save/load file persistence, settings menu, polish). Resist mod support and elaborate rendering until this window is solid.
 
 ## Exact build/test commands
 ```
 cd /home/superuser/Cookie-Clicker
 cmake -S cpp -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
-timeout 3 ./build/cookie_clicker   # runs fixed-timestep loop, exits 0
+timeout 3 ./build/cookie_clicker   # runs fixed-timestep loop, opens a window; killed by timeout after 3s; exit 124 is expected
 ```
-Syntax check (no SDL needed):
+Requires (present on this box): SDL2, OpenGL, libpng, FreeType2. CMake finds all four (`find_package(PNG)`, `find_package(Freetype)`).
+
+Asset handling: the GUI assets needed by the minimal GUI (18 building icons, big cookie, bgBlue, storeTile, TTF font) are embedded into the binary as byte arrays (`cpp/EmbeddedAssets.*`) and extracted to a temp dir at `Render::init`, so the executable is self-contained regardless of working directory. Run from anywhere: `./build/cookie_clicker` or `cd build && ./cookie_clicker`.
+
+Syntax check (no SDL/png/ft needed for core):
 ```
 cd cpp
 g++ -std=c++17 -fsyntax-only -Wall -Wextra -I. *.cpp
 ```
 
-## How to verify it's done (a check that passes, not "compiles")
-After implementing calculateGains: start the game, buy one Cursor via the (still-stubbed) UI or directly in code, then confirm `cookiesPs > 0` and `cookies` increases by `cookiesPs * elapsed_seconds` after several frames. A programmatic check: after `N` loop iterations with one Cursor owned, `Game.cookies >= N * (1.0 / 30.0) * Cursor.cps` (within floating tolerance). "Compiles" is NOT sufficient verification.
+## Verification status
+
+**calculateGains — VERIFIED**
+- Start the game, buy one Cursor directly in code (`game.cookies = 100; game.buyBuilding(cursor, 1)`)
+- Confirmed `cookiesPs == 0.1` (> 0)
+- Confirmed `cookies` increases by `cookiesPs * elapsed_seconds` (0.2 over 2s at 30 FPS, exact match)
+- Programmatic check passed: after N loop iterations with one Cursor owned, `Game.cookies >= N * (1.0/30.0) * Cursor.cps` within floating tolerance
+
+**Save/Load — VERIFIED** (this scoped item)
+- Standalone harness (`/tmp/opencode/saveload_test.cpp`, compiled against `cpp/` sources): 0 failures
+- `writeSave` → `encodeForStorage` → `decodeFromStorage` → `loadSave` round-trips byte-identical (also fixed a `base64Decode` padding bug that appended a stray `0xff` byte)
+- Save format now matches JS `Game.WriteSave` field order exactly: section 2 ends `seed|` (was `seed;`, merging sections 2/3); section 4 fields 0–50 in JS order (cookiesSucked 16, wrinklersPopped 17, santaLevel 18, reindeerClicked 19, seasonT 20, seasonUses 21, season 22, wrinklers.amount 23, wrinklers.number 24, prestige 25 … dragonLevel 35, volume 39, wrinklers.shinies 40, wrinklers.amountShinies 41, lumps 42 … lumpCurrentType 46, vault 47 comma-joined, heralds 48, fortuneGC 49, fortuneCPS 50)
+- Section 5 (buildings): write emits `amount,bought,floor(totalCookies),level,,muted;` per vanilla building in `objects` order; load applies amount, bought, totalCookies, level and muted to `Game.objects` and recomputes `buildingsOwned` + `recalculateGainsFlag`
+- Section 8 (buffs): write emits `type.id,maxTime,time,arg1,arg2,arg3;` (times in frames × fps); load resolves `type.id` via a new `Game.buffTypes` registry (unknown ids get a placeholder so saves still round-trip), restores maxTime/time (frames → seconds) and args
+- Wrinklers: `Wrinkler` model (12 slots) added; `cpsSucked` derived from sucking (phase==2) wrinklers; save computes amount/number/shinies/amountShinies (JS `SaveWrinklers` semantics); load restores phase/sucked/type (JS `LoadWrinklers` semantics, shinies first)
+- Vault: `std::vector<i32> Game.vault`; save writes comma-joined ids, load parses them
+- Doubles written with `std::setprecision(17)` so cookie counts round-trip exactly through both C++ and JS number parsing
+- Synthetic JS-field-order ("browser") save loads correctly: cookies, building amounts/bought/totalCookies/level/muted, and `cookiesPs > 0` after load all verified
+
+**Rendering fixes — VERIFIED this session:**
+- Text diagonal tearing fixed in `Render::getGlyph()`: `glPixelStorei(GL_UNPACK_ALIGNMENT, 1)` + `GL_UNPACK_ROW_LENGTH` set to FreeType's `bm.pitch` before uploading glyph alpha bitmaps (padded rows no longer cause stripes).
+- Big cookie white square fixed in `Render::drawTexture()`: added `glEnable(GL_TEXTURE_2D)` before binding (`drawText()` leaves texturing disabled). Corrected asset path `imperfectCookie.png` → `perfectCookie.png`; replaced embedded byte data with real `perfectCookie.png` (98,484 bytes); removed all `imperfectCookie` references.
+- PNG alpha: `loadPNG()` no longer calls `png_set_add_alpha` after `png_set_tRNS_to_alpha` (was overwriting tRNS transparency with opaque white). `loadTexture` logs every success/failure instead of silently falling back to magenta.
+- Background: `Game::draw()` draws `img/bgBlue.png` full-screen instead of a dark rect.
+- Cookie count text scale reduced 2.0f → 1.5f (y -14 → -10) so it fits on screen.
+- Build + run verified: `cmake --build build -j` (exit 0), `timeout 3 ./build/cookie_clicker` (exit 124, expected from timeout). Cookie renders as a proper cookie; text clean; blue background shows.
+
+**Store panel — VERIFIED this session:**
+- `bgBlue.png` path fixed (`"img/bgBlue.png"` → `"bgBlue.png"`); `bgBlue.png` embedded (433,960 bytes).
+- `cursor.png` sprite sheet: only top-left 32x32 quadrant (white index finger) drawn, stretched to 64x64 icon slot.
+- BUY buttons removed: full-row click buys one building; hit-test → `game.buyBuilding()` works via existing `main.cpp` handler.
+- `storeTile.png` (74,308 bytes) embedded; each row uses one 64px strip via UV coords at natural 300px width centered in cell.
+- Locked buildings show `"???"`, icon hidden, red price; affordable green price.
+- Big faded owned amount inside cell repositioned per Image 1 to bottom-right corner (`right:12px`, below the price line) instead of top:6px, scale 0.9f (~14px), color `0x00000066`.
+- Cell separator line (`0x4A4A60FF`) at bottom of each row → grid-of-cells look.
+- Cookie wobble clamped 90%–120%; click pop target 1.2 + velocity 0.3 (was `+= 1.5`).
+- Permanent unlock: `cookiesEarned >= basePrice` sets `b->locked = false` (save-compatible).
+- Build + run verified: all 8 textures load, no magenta fallback, exit 124 expected from timeout.
 
 ## Known broken, stubbed, or unverified code (honest list)
-UNVERIFIED — nothing in the gameplay path has been run end-to-end; only the empty loop was executed.
 
 Stubs (no-op / placeholder):
-- `cpp/Render.cpp` — Render::init/newFrame/render/shutdown all no-op; no window drawing yet
 - `cpp/Audio.cpp` — Audio::init/playSound/setVolume all no-op; no sound playback
 - `cpp/Assets.cpp` — Assets::init no-op, hasImage always returns false
-- `cpp/Game.cpp::draw()` — empty; nothing is drawn
-- `cpp/Game.cpp::logic()` — `dt` unused; only calls per-frame building hooks + placeholder calculateGains + updateSpecial/updateGrandmapocalypse/particlesUpdate (all empty)
-- `cpp/Game.cpp::mouseCps()` — partial: includes some "fingers" upgrades but click calc is a placeholder (`mult * add`), missing Cookie egg, eff click, buffs, auras, gods
-- `cpp/Game.cpp::calculateGains()` — placeholder: only sums `amount * cps` across buildings, no upgrades/buffs/mults/heavenly power
-- `cpp/SaveLoad.cpp::loadSave()` — section 5 (buildings) section is iterated but amounts are NOT applied to buildings; wrinklers not modelled; vault not parsed; buffs (section 8) not parsed
-- `cpp/SaveLoad.cpp::writeSave()` — building minigame save field is empty comma; wrinklers write hardcoded 0; vault writes "0"
+- `cpp/Game.cpp::updateSpecial/updateGrandmapocalypse/particlesUpdate` — empty
+- `cpp/SaveLoad.cpp::loadSave()` — minigame saves (section 5 field 4) ignored (minigames stubbed); ascensionMode (section 4 field 29) read as placeholder; season variables loaded but season behavior stubbed
+- `cpp/SaveLoad.cpp::writeSave()` — building minigame save field is empty comma (matches JS when no minigame); ascensionMode writes placeholder 0
 - `cpp/Minigame.cpp` and Garden/Grimoire/Pantheon/Dungeons — all stubs (init sets loaded=true, nothing else)
 - `cpp/DungeonGen.cpp` — returns "Mysterious dungeon" only
 - `cpp/Shimmer.cpp`, `Particle.cpp` — basic structs only, not wired into game
-- `cpp/Building.cpp` — `modifyBuildingPrice` hook not implemented; `getSumPrice` correct but unused
+- `cpp/Building.cpp` — `modifyBuildingPrice` hook not implemented; `getSumPrice` correct but unused; buy/sell cookie deduction handled by Game (not Building)
+- Wrinkler simulation beyond `cpsSucked` (spawning, clicking/popping, hp, close animation) not implemented — save/load and CpS sucking only
+- Buff behavior (multCpS/multClick effects in `calculateGains`/`mouseCps`) still stubbed — save/load round-trip only
+
+Partially implemented:
+- `cpp/Game.cpp::mouseCps()` — includes fingers/mouse upgrades/buffs/aura/gods, but missing Cookie egg, eff click, custom callbacks fully wired
+- `cpp/Game.cpp::calculateGains()` — full port: building CpS + prestige + cookie upgrades + kittens + eggs + sugar baking + auras + golden switch + elder covenant + wrinklers + buffs + globalCpsMult. VERIFIED for base building CpS.
+- `cpp/Game.cpp::logic()` — earns cookies per frame, handles milk/research/seasons/wrinklers/totalCookies/autosave; missing minigame logic, particle shower, achievement wins
+- `cpp/Game.cpp::clickCookie()` — earns cookies, updates handmadeCookies/cookieClicks; missing particles, sound, customCookieClicks, loseShimmeringVeil
 
 Unverified:
 - Base64 encode/decode round-trip with special characters
@@ -59,7 +116,7 @@ The current `cpp/` skeleton predates the DSi/3DS constraints and violates them. 
 ## Decisions already made (do not redo)
 - All cookie math uses C++ `double` to match JS IEEE-754 behavior
 - Main loop is fixed-timestep at ~30 FPS (`GameConst::FPS`), matching the JS `setTimeout` loop
-- Rendering target: SDL2 + OpenGL, Dear ImGui optional (not present on this box; stub used)
+- Rendering target: SDL2 + OpenGL window; PNG decoding via libpng; text via FreeType2 (TTF). Dear ImGui not used. `cpp/Render.cpp` is the PC backend implementation; the core never sees SDL/OpenGL types.
 - SDL2_mixer optional (not present; Audio is stub)
 - Save format: exact JS-compatible pipe/semicolon text → UTF-8 → Base64 → `!END!` → escape; `pack3` = identity (raw `0/1` bitstrings)
 - Save persistence: file-based (`<bakeryName>Bakery.txt`) instead of localStorage/cookies

@@ -32,6 +32,7 @@ public:
     f64 ascendDuration = 0.0;
     bool sesame = false;           // debug mode
     bool debugTimersOn = false;
+    bool toSave = false;           // autosave trigger
     i32 volume = 100;
     i32 fps = GameConst::FPS;
     i32 loopT = 0;
@@ -54,6 +55,8 @@ public:
     f64 cookiesReset = 0.0;
     f64 handmadeCookies = 0.0;
     f64 cookiesSucked = 0.0;
+    f64 cpsSucked = 0.0;
+    f64 computedMouseCps = 1.0;
     i32 cookieClicks = 0;
     i32 goldenClicks = 0;
     i32 goldenClicksLocal = 0;
@@ -75,6 +78,7 @@ public:
     std::vector<std::unique_ptr<Achievement>> achievements;
     std::vector<Achievement*> achievementsById;
     i32 achievementsOwned = 0;
+    i32 upgradesOwned = 0;
 
     // --- prestige / lumps --------------------------------------------------
     f64 prestige = 0.0;
@@ -96,6 +100,28 @@ public:
     f64 researchT = 0.0;
     i32 bgType = 0;
     i32 milkType = 0;
+
+    // --- wrinklers ---------------------------------------------------------
+    // Mirrors JS Game.wrinklers (12 fixed slots). phase: 0=absent, 1=closing,
+    // 2=sucking. sucked = cookies stored inside. cpsSucked is derived from the
+    // number of sucking wrinklers each frame in calculateGains().
+    struct Wrinkler {
+        i32 id = 0;
+        i32 phase = 0;
+        i32 close = 0;
+        f64 sucked = 0.0;
+        f64 hp = 0.0;
+        i32 selected = 0;
+        i32 type = 0; // 0 normal, 1 shiny
+    };
+    std::vector<Wrinkler> wrinklers;   // fixed 12 slots, created in Game::load()
+    i32 wrinklersPopped = 0;
+    f64 wrinklerHP = 2.1;              // JS Game.wrinklerHP
+
+    // --- vault -------------------------------------------------------------
+    // Upgrade ids that have been vaulted (shift-clicked), mirroring JS
+    // Game.vault (comma-joined list of ids in the save).
+    std::vector<i32> vault;
     std::string season;            // current season name, "" = none
     f64 seasonT = 0.0;
     i32 seasonUses = 0;
@@ -144,6 +170,11 @@ public:
     std::vector<std::unique_ptr<Shimmer>> shimmers;
     std::vector<std::unique_ptr<Particle>> particles;
 
+    // --- buff type registry ------------------------------------------------
+    // Buff archetypes keyed by numeric id (mirrors JS Game.buffTypes).
+    // Used by save/load to resolve a saved buff type id back to a BuffType.
+    std::map<i32, std::shared_ptr<BuffType>> buffTypes;
+
     // --- minigame registry -------------------------------------------------
     // one minigame per building that supports it (Farm, Wizard tower, ...)
     std::map<i32, std::unique_ptr<Minigame>> minigames; // keyed by building id
@@ -182,10 +213,18 @@ public:
     f64 mouseCps();
     void clickCookie(i32 amount = 0);
     void calculateGains();         // Game.CalculateGains (recompute cookiesPs)
+    f64 ComputeCps(f64 baseCps, i32 clickUpgrades, f64 add);  // JS ComputeCps
+    f64 GetTieredCpsMult(Building* me);                        // tiered CPS mult
+    f64 magicCpS(const std::string& name);                     // grimoire magic mult
+    f64 auraMult(const std::string& name);                     // dragon aura mult
+    f64 GetHeavenlyMultiplier();                               // prestige mult
+    void buyBuilding(Building* b, i32 amount = 1);              // purchase building
+    void sellBuilding(Building* b, i32 amount = 1);             // sell building
 
     // --- building/upgrade helpers ------------------------------------------
     bool has(const std::string& name) const;           // Game.Has (upgrade)
     bool hasAchiev(const std::string& name) const;
+    i32 getGodLevel(const std::string& name) const;    // 0 if no pantheon god
     void unlock(const std::string& name);
     Building* getBuilding(const std::string& name);
 
@@ -211,6 +250,11 @@ private:
     f64 bigCookieSize = 0.0;
     f64 bigCookieSizeD = 0.0;
     f64 bigCookieSizeT = 1.0;
+
+    // GUI feedback (set by buyBuilding; drawn by Render, not part of sim)
+    i32 flashBuildingIndex = -1;
+    i32 flashFrames = 0;
+
     i32 cookieClickSound = 1;
     f64 milkProgress = 0.0;
     f64 milkH = 0.0;
@@ -220,6 +264,8 @@ private:
     void updateGrandmapocalypse();
     void particlesUpdate();
     void textParticlesUpdate();
+    void updateShimmers();
+    void updateBuffs();
 };
 
 extern Game* g_game; // accessor, like the global `Game` in JS

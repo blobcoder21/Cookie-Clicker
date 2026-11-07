@@ -31,6 +31,7 @@ int main(int argc, char** argv) {
 
     Game game;
     game.launch();
+    game.load(); // populate buildings, wrinklers, buff types
 
     bool running = true;
     SDL_Event event;
@@ -38,10 +39,20 @@ int main(int argc, char** argv) {
     const f64 targetDt = 1.0 / static_cast<f64>(GameConst::FPS);
     f64 accumulator = 0.0;
 
+    i32 clickX = 0, clickY = 0;
+    bool clickPending = false;
+
     while (running) {
+        clickPending = false;
         while (SDL_PollEvent(&event)) {
-            // TODO: ImGui_ImplSDL2_ProcessEvent(&event);
-            if (event.type == SDL_QUIT) running = false;
+            if (event.type == SDL_QUIT) {
+                running = false;
+            } else if (event.type == SDL_MOUSEBUTTONDOWN &&
+                       event.button.button == SDL_BUTTON_LEFT) {
+                clickX = event.button.x;
+                clickY = event.button.y;
+                clickPending = true;
+            }
         }
 
         auto now = std::chrono::steady_clock::now();
@@ -49,17 +60,29 @@ int main(int argc, char** argv) {
         last = now;
         accumulator += frameDt;
 
-        // fixed-timestep logic, mirroring the JS setTimeout loop
+        // fixed-timestep logic, mirroring the JS setTimeout loop (~30 FPS)
         while (accumulator >= targetDt) {
-            game.loop();
+            game.loop();            // logic only; draw happens once per frame below
             accumulator -= targetDt;
         }
 
         Render::newFrame();
-        game.draw();
+        game.draw();                // draw once per rendered frame
         Render::render();
 
-        // simple frame cap
+        // handle input against this frame's clickable areas (cookie / buy buttons)
+        if (clickPending) {
+            i32 hit = Render::hitTest(clickX, clickY);
+            if (hit == Render::HIT_COOKIE) {
+                game.clickCookie();
+            } else if (hit >= Render::HIT_BUILDING_BASE) {
+                i32 idx = hit - Render::HIT_BUILDING_BASE;
+                if (idx >= 0 && idx < static_cast<i32>(game.objects.size())) {
+                    game.buyBuilding(game.objects[static_cast<size_t>(idx)].get());
+                }
+            }
+        }
+
         SDL_Delay(1);
     }
 

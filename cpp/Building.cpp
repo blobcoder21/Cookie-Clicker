@@ -35,7 +35,6 @@ f64 Building::getPrice(i32 n) const {
     i32 amount = (n == -1) ? this->amount : n;
     f64 price = basePrice * std::pow(GameConst::PRICE_INCREASE,
                                      std::max(0.0, static_cast<f64>(amount - free)));
-    // Game.modifyBuildingPrice hook would go here
     return std::ceil(price);
 }
 
@@ -47,12 +46,56 @@ f64 Building::getSumPrice(i32 amount) const {
     return price;
 }
 
+f64 Building::getReverseSumPrice(i32 amount) const {
+    f64 price = 0.0;
+    for (i32 i = std::max(0, this->amount - amount);
+         i < std::max(0, this->amount); ++i) {
+        price += getPrice(i);
+    }
+    price *= getSellMultiplier();
+    return std::ceil(price);
+}
+
+f64 Building::getSellMultiplier() const {
+    f64 giveBack = 0.25;
+    return giveBack;
+}
+
+void Building::buy(i32 amount) {
+    if (amount <= 0) amount = 1;
+    // Actual cookie deduction handled by Game::buyBuilding; this just updates
+    // the building's own counters and triggers its buyFunction.
+    for (i32 i = 0; i < amount; ++i) {
+        this->amount++;
+        this->bought++;
+        price = getPrice();
+        bulkPrice = price;
+        if (buyFunction) buyFunction(this);
+    }
+}
+
+void Building::sell(i32 amount, bool /*bypass*/) {
+    if (amount == -1) amount = this->amount;
+    if (amount <= 0) amount = 1;
+    i32 sold = 0;
+    for (i32 i = 0; i < amount; ++i) {
+        if (this->amount <= 0) break;
+        f64 price = getPrice();
+        f64 giveBack = getSellMultiplier();
+        price = std::floor(price * giveBack);
+        this->amount--;
+        price = getPrice();
+        bulkPrice = price;
+        sold++;
+    }
+    (void)sold;
+}
+
 void Building::refresh() {
     // placeholder for UI refresh + price/cps recalc
 }
 
 void Building::switchMinigame(bool on) {
-    // on == -1 means toggle (not representable via bool; callers handle it)
     onMinigame = on;
     refresh();
 }

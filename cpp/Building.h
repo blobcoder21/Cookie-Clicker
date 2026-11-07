@@ -81,12 +81,21 @@ public:
 
     std::function<void()> eachFrame;
 
+    // CPS function override (mirrors JS per-building cps function).
+    // When set, storedCps = cpsFunc(this) instead of baseCps.
+    std::function<f64(Building*)> cpsFunc;
+
     Building(std::string name, std::string commonName, std::string desc,
              std::string icon, i32 iconColumn, Art art,
              f64 price, f64 cps, std::function<void(Building*)> buyFunc);
 
+    // economy
     f64 getPrice(i32 n = -1) const;
     f64 getSumPrice(i32 amount) const;
+    f64 getReverseSumPrice(i32 amount) const;
+    f64 getSellMultiplier() const;
+    void buy(i32 amount = 1);
+    void sell(i32 amount = 1, bool bypass = false);
     void refresh();
     void switchMinigame(bool on);          // on == -1 toggles
 };

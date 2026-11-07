@@ -16,6 +16,7 @@
 // which the JS game already exhibits).
 // ---------------------------------------------------------------------------
 using f64 = double;
+using f32 = float;
 using i8 = std::int8_t;
 using i16 = std::int16_t;
 using i32 = std::int32_t;

@@ -227,6 +227,20 @@ Then `utf8_to_b64(str) + '!END!'` → `escape()` for disk. The C++ port must par
 - **339 images + ~50 sounds**: need to be copied into `assets/` and loaded; some are CSS-sprite-sheet based (`buildings.png`) — you'll need sub-rect UVs.
 - **DOM-heavy effects** (floating "+N cookies" numbers, sparkles, shimmers as DOM elements) must be reimplemented as renderable entities.
 
+### Rendering status — PC backend (Render.cpp) — VERIFIED WORKING
+
+The following rendering bugs were fixed and verified (build + run, exit 124 from `timeout`):
+- **Text diagonal tearing**: `Render::getGlyph()` now sets `glPixelStorei(GL_UNPACK_ALIGNMENT, 1)` and `GL_UNPACK_ROW_LENGTH` to FreeType's `bm.pitch` before uploading glyph alpha bitmaps.
+- **Big cookie white square**: `Render::drawTexture()` now calls `glEnable(GL_TEXTURE_2D)` before binding. Asset path corrected `imperfectCookie.png` → `perfectCookie.png`; embedded byte data replaced with real `perfectCookie.png`. All `imperfectCookie` references removed.
+- **PNG alpha**: `loadPNG()` no longer calls `png_set_add_alpha` after `png_set_tRNS_to_alpha`. `loadTexture` logs every success/failure.
+- **Background**: `Game::draw()` draws `img/bgBlue.png` full-screen instead of a dark rect. `bgBlue.png` embedded (433,960 bytes).
+- **Cookie text size**: scale reduced 2.0f → 1.5f so it fits on screen.
+- **Texture sub-rect UVs**: `drawTexture()` gained optional `srcX/srcY/srcW/srcH` params (0 = full texture). Cursor uses top-left 32x32 of `cursor.png` sprite sheet; store rows use one 64px strip of `storeTile.png` per row at natural 300px width centered in cell.
+- **Store panel**: no BUY button — full-row click buys; locked buildings show `"???"` with red price; permanent unlock via `cookiesEarned >= basePrice`; big faded owned amount inside cell repositioned per Image 1 to bottom-right corner (`right:12px`, below the price line) instead of top:6px; cell separator lines → grid-of-cells look.
+- **Cookie wobble**: clamped between 90% and 120%; click pop target 1.2 + velocity 0.3.
+
+Text renders clean, cookie renders as a proper cookie, blue background shows, store cells look correct. No further rendering work needed for the current scoped item.
+
 ---
 
 ## 7. Starter C++ skeleton

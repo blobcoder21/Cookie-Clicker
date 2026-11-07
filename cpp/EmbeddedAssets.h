@@ -1,0 +1,49 @@
+#pragma once
+#include <cstddef>
+
+namespace EmbeddedAssets {
+  extern unsigned char img_perfectCookie_png[];
+  extern unsigned int img_perfectCookie_png_len;
+  extern unsigned char img_cursor_png[];
+  extern unsigned int img_cursor_png_len;
+  extern unsigned char img_grandma_png[];
+  extern unsigned int img_grandma_png_len;
+  extern unsigned char img_farm_png[];
+  extern unsigned int img_farm_png_len;
+  extern unsigned char img_mine_png[];
+  extern unsigned int img_mine_png_len;
+  extern unsigned char img_factory_png[];
+  extern unsigned int img_factory_png_len;
+  extern unsigned char img_bank_png[];
+  extern unsigned int img_bank_png_len;
+  extern unsigned char img_temple_png[];
+  extern unsigned int img_temple_png_len;
+  extern unsigned char img_wizardtower_png[];
+  extern unsigned int img_wizardtower_png_len;
+  extern unsigned char img_shipment_png[];
+  extern unsigned int img_shipment_png_len;
+  extern unsigned char img_alchemylab_png[];
+  extern unsigned int img_alchemylab_png_len;
+  extern unsigned char img_portal_png[];
+  extern unsigned int img_portal_png_len;
+  extern unsigned char img_timemachine_png[];
+  extern unsigned int img_timemachine_png_len;
+  extern unsigned char img_antimattercondenser_png[];
+  extern unsigned int img_antimattercondenser_png_len;
+  extern unsigned char img_prism_png[];
+  extern unsigned int img_prism_png_len;
+  extern unsigned char img_chancemaker_png[];
+  extern unsigned int img_chancemaker_png_len;
+  extern unsigned char img_fractalEngine_png[];
+  extern unsigned int img_fractalEngine_png_len;
+  extern unsigned char img_javascriptconsole_png[];
+  extern unsigned int img_javascriptconsole_png_len;
+  extern unsigned char img_idleverse_png[];
+  extern unsigned int img_idleverse_png_len;
+  extern unsigned char img_bgBlue_png[];
+  extern unsigned int img_bgBlue_png_len;
+  extern unsigned char img_storeTile_png[];
+  extern unsigned int img_storeTile_png_len;
+  extern unsigned char fonts_Tahoma_Bold_Font_ttf[];
+  extern unsigned int fonts_Tahoma_Bold_Font_ttf_len;
+} // namespace EmbeddedAssets

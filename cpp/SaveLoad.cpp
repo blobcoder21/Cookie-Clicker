@@ -2,6 +2,7 @@
 #include "Game.h"
 #include "Building.h"
 #include <sstream>
+#include <iomanip>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -54,6 +55,7 @@ std::string SaveLoad::base64Decode(const std::string& in) {
         if (c >= '0' && c <= '9') return c - '0' + 52;
         if (c == '+') return 62;
         if (c == '/') return 63;
+        if (c == '=') return 64; // padding marker, matches the encoder's "missing" value
         return -1;
     };
 
@@ -160,18 +162,29 @@ std::string f64Str(f64 v) {
 std::string SaveLoad::writeSave(Game& game, i32 /*type*/) {
     std::ostringstream s;
     auto field = [&](const std::string& v) { s << v << ';'; };
-    auto numField = [&](f64 v) { s << v << ';'; };
+    // Print doubles with enough significant digits to round-trip any
+    // IEEE-754 double exactly (17 digits). JS Number.toString() produces the
+    // shortest such string; parseFloat/stod both accept exponent notation, so
+    // values written here parse identically on both sides.
+    auto num = [&](f64 v) {
+        std::ostringstream os;
+        os << std::setprecision(17) << v;
+        s << os.str();
+    };
+    auto numField = [&](f64 v) { num(v); s << ';'; };
     auto intField = [&](i64 v) { s << v << ';'; };
 
     s << game.VERSION << '|';
     s << '|'; // reserved
 
     // --- run stats (section 2) ---
+    // JS writes: start;full;last;name;seed|  (seed is NOT ';'-terminated;
+    // the '|' is the section terminator).
     numField(game.startDate);
     numField(game.fullDate);
     numField(game.lastDate);
     field(game.bakeryName);
-    field(game.seed);
+    s << game.seed << '|';
 
     // --- prefs bitstring (section 3) ---
     {
@@ -202,64 +215,87 @@ std::string SaveLoad::writeSave(Game& game, i32 /*type*/) {
     }
 
     // --- misc game data (section 4) ---
-    numField(game.cookies);
-    numField(game.cookiesEarned);
-    intField(game.cookieClicks);
-    intField(game.goldenClicks);
-    numField(game.handmadeCookies);
-    intField(game.missedGoldenClicks);
-    intField(game.bgType);
-    intField(game.milkType);
-    numField(game.cookiesReset);
-    intField(game.elderWrath);
-    intField(game.pledges);
-    intField(game.pledgeT);
-    intField(game.nextResearch);
-    intField(game.researchT);
-    intField(game.resets);
-    intField(game.goldenClicksLocal);
-    numField(game.cookiesSucked);
+    // Field order mirrors JS Game.WriteSave exactly so browser-made saves
+    // load into this build (and vice versa).
+    numField(game.cookies);              // 0
+    numField(game.cookiesEarned);        // 1
+    intField(game.cookieClicks);         // 2
+    intField(game.goldenClicks);         // 3
+    numField(game.handmadeCookies);      // 4
+    intField(game.missedGoldenClicks);   // 5
+    intField(game.bgType);               // 6
+    intField(game.milkType);             // 7
+    numField(game.cookiesReset);         // 8
+    intField(game.elderWrath);           // 9
+    intField(game.pledges);              // 10
+    numField(game.pledgeT);              // 11
+    intField(game.nextResearch);         // 12
+    numField(game.researchT);            // 13
+    intField(game.resets);               // 14
+    intField(game.goldenClicksLocal);    // 15
+    numField(game.cookiesSucked);        // 16
+    intField(game.wrinklersPopped);      // 17
+    intField(game.santaLevel);           // 18
+    intField(game.reindeerClicked);      // 19
+    numField(game.seasonT);              // 20
+    intField(game.seasonUses);           // 21
+    field(game.season);                  // 22
 
-    // wrinklers (placeholder - not yet modelled in skeleton)
-    numField(0.0); // amount
-    intField(0);   // number
-    numField(game.prestige);
-    numField(game.heavenlyChips);
-    numField(game.heavenlyChipsSpent);
-    numField(game.heavenlyCookies);
-    intField(game.ascendTimer > 0 ? 1 : 0); // ascensionMode placeholder
-
-    for (i32 i = 0; i < 5; ++i) intField(game.permanentUpgrades[i]);
-
-    intField(game.dragonLevel);
-    intField(game.dragonAura);
-    intField(game.dragonAura2);
-    intField(game.chimeType);
-    intField(game.volume);
-    intField(0); // shinies
-    numField(0.0); // shinies amount
-    numField(game.lumps);
-    numField(game.lumpsTotal);
-    numField(game.lumpT);
-    numField(game.lumpRefill);
-    intField(game.lumpCurrentType);
-    // vault: comma-joined list
-    s << "0;"; // placeholder
-    intField(game.heralds);
-    intField(game.fortuneGC);
-    intField(game.fortuneCPS);
+    // wrinklers: amount/number (23,24) and shinies/amountShinies (40,41).
+    // JS SaveWrinklers: count wrinklers with sucked > 0.5.
+    f64 wrinkleAmount = 0.0, wrinkleAmountShinies = 0.0;
+    i32 wrinkleNumber = 0, wrinkleShinies = 0;
+    for (auto& w : game.wrinklers) {
+        if (w.sucked > 0.5) {
+            ++wrinkleNumber;
+            if (w.type == 1) { ++wrinkleShinies; wrinkleAmountShinies += w.sucked; }
+            else wrinkleAmount += w.sucked;
+        }
+    }
+    numField(wrinkleAmount);   // 23
+    intField(wrinkleNumber);   // 24
+    numField(game.prestige);         // 25
+    numField(game.heavenlyChips);    // 26
+    numField(game.heavenlyChipsSpent); // 27
+    numField(game.heavenlyCookies);  // 28
+    intField(0);                     // 29 ascensionMode placeholder
+    for (i32 i = 0; i < 5; ++i) intField(game.permanentUpgrades[i]); // 30-34
+    intField(game.dragonLevel);      // 35
+    intField(game.dragonAura);       // 36
+    intField(game.dragonAura2);      // 37
+    intField(game.chimeType);        // 38
+    intField(game.volume);           // 39
+    intField(wrinkleShinies);        // 40
+    numField(wrinkleAmountShinies);  // 41
+    numField(game.lumps);            // 42
+    numField(game.lumpsTotal);       // 43
+    numField(game.lumpT);            // 44
+    numField(game.lumpRefill);       // 45
+    intField(game.lumpCurrentType);  // 46
+    // vault: comma-joined list of upgrade ids (47)
+    {
+        for (size_t i = 0; i < game.vault.size(); ++i) {
+            if (i) s << ',';
+            s << game.vault[i];
+        }
+        s << ';';
+    }
+    intField(game.heralds);          // 48
+    intField(game.fortuneGC);        // 49
+    intField(game.fortuneCPS);       // 50
 
     s << '|';
 
     // --- buildings (section 5) ---
+    // amount,bought,totalCookies,level,minigameSave,muted;  (minigame save
+    // left empty - minigames are stubbed in this skeleton)
     for (auto& b : game.objects) {
         if (!b->vanilla) continue;
         s << b->amount << ',';
         s << b->bought << ',';
-        numField(std::floor(b->totalCookies));
-        intField(b->level);
-        // minigame save (placeholder)
-        s << ',';
+        s << std::floor(b->totalCookies) << ',';
+        s << b->level << ',';
+        s << ','; // minigame save (placeholder)
         s << (b->muted ? '1' : '0');
         s << ';';
     }
@@ -291,12 +327,17 @@ std::string SaveLoad::writeSave(Game& game, i32 /*type*/) {
     s << '|';
 
     // --- buffs (section 8) ---
+    // type.id,maxTime,time,arg1,arg2,arg3;  (maxTime/time stored in frames:
+    // internal seconds * fps, matching JS which saves frame counts)
+    f64 fps = static_cast<f64>(game.fps);
     for (auto& bf : game.buffs) {
-        if (!bf->type) continue;
+        if (!bf || !bf->type) continue;
         s << bf->type->id << ',';
-        numField(bf->maxTime);
-        numField(bf->time);
-        // args placeholders
+        num(bf->maxTime * fps); s << ',';
+        num(bf->time * fps); s << ',';
+        num(bf->arg1); s << ',';
+        num(bf->arg2); s << ',';
+        num(bf->arg3);
         s << ';';
     }
     s << '\n';
@@ -386,6 +427,7 @@ bool SaveLoad::loadSave(Game& game, const std::string& raw) {
     game.prefs.timeout = pbit(20, false);
 
     // --- section 4: misc data ---
+    // Field order mirrors JS Game.WriteSave exactly.
     spl = splitSemi(sections[4]);
     game.cookies = getf(spl, 0);
     game.cookiesEarned = getf(spl, 1);
@@ -404,39 +446,105 @@ bool SaveLoad::loadSave(Game& game, const std::string& raw) {
     game.resets = static_cast<i32>(geti(spl, 14));
     game.goldenClicksLocal = static_cast<i32>(geti(spl, 15));
     game.cookiesSucked = getf(spl, 16);
-    // wrinklers 17,18 (not modelled yet)
-    game.prestige = getf(spl, 19);
-    game.heavenlyChips = getf(spl, 20);
-    game.heavenlyChipsSpent = getf(spl, 21);
-    game.heavenlyCookies = getf(spl, 22);
-    // ascensionMode 23
+    game.wrinklersPopped = static_cast<i32>(geti(spl, 17));
+    game.santaLevel = static_cast<i32>(geti(spl, 18));
+    game.reindeerClicked = static_cast<i32>(geti(spl, 19));
+    game.seasonT = getf(spl, 20);
+    game.seasonUses = static_cast<i32>(geti(spl, 21));
+    game.season = gets(spl, 22, game.baseSeason);
+    // wrinklers: amount (23), number (24); shinies (40), amountShinies (41)
+    f64 wrinkleAmount = getf(spl, 23);
+    i32 wrinkleNumber = static_cast<i32>(geti(spl, 24));
+    game.prestige = getf(spl, 25);
+    game.heavenlyChips = getf(spl, 26);
+    game.heavenlyChipsSpent = getf(spl, 27);
+    game.heavenlyCookies = getf(spl, 28);
+    // ascensionMode 29 (placeholder - not modelled)
+    (void)geti(spl, 29);
     for (i32 i = 0; i < 5; ++i) {
-        game.permanentUpgrades[i] = static_cast<i32>(geti(spl, 24 + i));
+        game.permanentUpgrades[i] = static_cast<i32>(geti(spl, 30 + i));
     }
-    i32 base = 29;
-    game.dragonLevel = static_cast<i32>(geti(spl, base));
-    game.dragonAura = static_cast<i32>(geti(spl, base + 1));
-    game.dragonAura2 = static_cast<i32>(geti(spl, base + 2));
-    game.chimeType = static_cast<i32>(geti(spl, base + 3));
-    game.volume = static_cast<i32>(geti(spl, base + 4));
-    // shinies base+5, shiniesAmount base+6
-    game.lumps = getf(spl, base + 7);
-    game.lumpsTotal = getf(spl, base + 8);
-    game.lumpT = getf(spl, base + 9);
-    game.lumpRefill = getf(spl, base + 10);
-    game.lumpCurrentType = static_cast<i32>(geti(spl, base + 11));
-    // vault base+12 (comma joined - placeholder)
-    game.heralds = static_cast<i32>(geti(spl, base + 13));
-    game.fortuneGC = static_cast<i32>(geti(spl, base + 14));
-    game.fortuneCPS = static_cast<i32>(geti(spl, base + 15));
+    game.dragonLevel = static_cast<i32>(geti(spl, 35));
+    game.dragonAura = static_cast<i32>(geti(spl, 36));
+    game.dragonAura2 = static_cast<i32>(geti(spl, 37));
+    game.chimeType = static_cast<i32>(geti(spl, 38));
+    game.volume = static_cast<i32>(geti(spl, 39));
+    i32 wrinkleShinies = static_cast<i32>(geti(spl, 40));
+    f64 wrinkleAmountShinies = getf(spl, 41);
+    game.lumps = getf(spl, 42);
+    game.lumpsTotal = getf(spl, 43);
+    game.lumpT = getf(spl, 44);
+    game.lumpRefill = getf(spl, 45);
+    game.lumpCurrentType = static_cast<i32>(geti(spl, 46));
+    // vault (47): comma-joined list of upgrade ids
+    game.vault.clear();
+    {
+        std::string vaultStr = gets(spl, 47);
+        if (!vaultStr.empty()) {
+            std::string cur;
+            for (char c : vaultStr) {
+                if (c == ',') {
+                    if (!cur.empty()) game.vault.push_back(static_cast<i32>(getf(std::vector<std::string>{cur}, 0)));
+                    cur.clear();
+                } else cur.push_back(c);
+            }
+            if (!cur.empty()) game.vault.push_back(static_cast<i32>(getf(std::vector<std::string>{cur}, 0)));
+        }
+    }
+    game.heralds = static_cast<i32>(geti(spl, 48));
+    game.fortuneGC = static_cast<i32>(geti(spl, 49));
+    game.fortuneCPS = static_cast<i32>(geti(spl, 50));
+
+    // Restore wrinkler state (JS LoadWrinklers semantics):
+    // shinies are assigned to the first slots, then normals; sucked split evenly.
+    if (wrinkleNumber > 0 && (wrinkleAmount > 0.0 || wrinkleAmountShinies > 0.0)) {
+        i32 fullNumber = wrinkleNumber - wrinkleShinies;
+        i32 fullNumberShinies = wrinkleShinies;
+        i32 remaining = wrinkleNumber;
+        i32 shiniesLeft = wrinkleShinies;
+        for (auto& w : game.wrinklers) {
+            if (remaining <= 0) break;
+            w.phase = 2;
+            w.close = 1;
+            w.hp = 3.0;
+            if (shiniesLeft > 0) {
+                w.type = 1;
+                w.sucked = fullNumberShinies > 0 ? wrinkleAmountShinies / static_cast<f64>(fullNumberShinies) : 0.0;
+                --shiniesLeft;
+            } else {
+                w.type = 0;
+                w.sucked = fullNumber > 0 ? wrinkleAmount / static_cast<f64>(fullNumber) : 0.0;
+            }
+            --remaining;
+        }
+    }
 
     // --- section 5: buildings ---
+    // JS iterates Game.Objects in order and writes one entry per vanilla
+    // building; entries are matched 1:1 to vanilla buildings in objects[].
     if (sections.size() > 5 && !sections[5].empty()) {
-        std::string bsec = sections[5];
-        size_t pos = 0;
-        while ((pos = bsec.find(';')) != std::string::npos) {
-            std::string bstr = bsec.substr(0, pos);
-            bsec.erase(0, pos + 1);
+        std::vector<std::string> bents;
+        {
+            std::string cur;
+            for (char c : sections[5]) {
+                if (c == ';') { bents.push_back(cur); cur.clear(); }
+                else cur.push_back(c);
+            }
+            bents.push_back(cur); // trailing entry
+        }
+        auto bgetf = [&](const std::vector<std::string>& v, i32 idx,
+                         f64 def = 0.0) -> f64 {
+            if (idx < 0 || idx >= static_cast<i32>(v.size()) || v[idx].empty())
+                return def;
+            try { return std::stod(v[idx]); } catch (...) { return def; }
+        };
+        i32 bi = 0;
+        i32 buildingsOwned = 0;
+        for (auto& b : game.objects) {
+            if (!b || !b->vanilla) continue;
+            if (bi >= static_cast<i32>(bents.size())) break;
+            const std::string& bstr = bents[bi];
+            ++bi;
             if (bstr.empty()) continue;
             std::vector<std::string> bf;
             {
@@ -447,9 +555,16 @@ bool SaveLoad::loadSave(Game& game, const std::string& raw) {
                 }
                 bf.push_back(cur);
             }
-            // find building by name is not possible here (name not stored);
-            // skeleton skips building amounts. Full port must match building order.
+            b->amount = static_cast<i32>(bgetf(bf, 0));
+            b->bought = static_cast<i32>(bgetf(bf, 1));
+            b->totalCookies = bgetf(bf, 2);
+            b->level = static_cast<i32>(bgetf(bf, 3));
+            // bf[4]: minigame save (minigames are stubbed - ignored)
+            if (bf.size() > 5) b->muted = static_cast<i32>(bgetf(bf, 5, 0.0)) != 0;
+            buildingsOwned += b->amount;
         }
+        game.buildingsOwned = buildingsOwned;
+        game.recalculateGainsFlag();
     }
 
     // --- section 6: upgrades bitstring ---
@@ -480,8 +595,58 @@ bool SaveLoad::loadSave(Game& game, const std::string& raw) {
     }
 
     // --- section 8: buffs ---
-    if (sections.size() > 8) {
-        // placeholder: buff parsing requires the Buff type registry
+    // type.id,maxTime,time,arg1,arg2,arg3  (maxTime/time stored in frames)
+    if (sections.size() > 8 && !sections[8].empty()) {
+        f64 fps = static_cast<f64>(game.fps);
+        std::string bsec = sections[8];
+        size_t pos = 0;
+        while ((pos = bsec.find(';')) != std::string::npos) {
+            std::string bstr = bsec.substr(0, pos);
+            bsec.erase(0, pos + 1);
+            if (bstr.empty()) continue;
+            std::vector<std::string> bf;
+            {
+                std::string cur;
+                for (char c : bstr) {
+                    if (c == ',') { bf.push_back(cur); cur.clear(); }
+                    else cur.push_back(c);
+                }
+                bf.push_back(cur);
+            }
+            if (bf.size() < 3) continue;
+            auto bgetf = [&](i32 idx, f64 def = 0.0) -> f64 {
+                if (idx < 0 || idx >= static_cast<i32>(bf.size()) || bf[idx].empty())
+                    return def;
+                try { return std::stod(bf[idx]); } catch (...) { return def; }
+            };
+            i32 typeId = static_cast<i32>(bgetf(0));
+            // JS stores frames; Buff keeps seconds internally.
+            f64 maxTime = bgetf(1) / fps;
+            f64 time = bgetf(2) / fps;
+            f64 arg1 = bgetf(3);
+            f64 arg2 = bgetf(4);
+            f64 arg3 = bgetf(5);
+
+            std::shared_ptr<BuffType> type;
+            auto it = game.buffTypes.find(typeId);
+            if (it != game.buffTypes.end()) type = it->second;
+            if (!type) {
+                // unknown id: keep a placeholder so saves still round-trip
+                type = std::make_shared<BuffType>();
+                type->id = typeId;
+                type->name = "buff-" + std::to_string(typeId);
+                type->vanilla = true;
+                game.buffTypes[typeId] = type;
+            }
+            auto nb = std::make_unique<Buff>();
+            nb->type = type;
+            nb->maxTime = maxTime;
+            nb->time = time;
+            nb->arg1 = arg1;
+            nb->arg2 = arg2;
+            nb->arg3 = arg3;
+            game.buffs.push_back(std::move(nb));
+        }
     }
 
     game.recalculateGainsFlag();

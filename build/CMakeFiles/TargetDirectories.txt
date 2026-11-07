@@ -1,0 +1,3 @@
+/home/superuser/Cookie-Clicker/build/CMakeFiles/cookie_clicker.dir
+/home/superuser/Cookie-Clicker/build/CMakeFiles/edit_cache.dir
+/home/superuser/Cookie-Clicker/build/CMakeFiles/rebuild_cache.dir

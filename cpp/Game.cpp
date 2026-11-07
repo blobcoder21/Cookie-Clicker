@@ -1,9 +1,104 @@
 #include "Game.h"
 #include "SaveLoad.h"
+#include "Building.h"
+#include "Render.h"
 #include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <cstdio>
+#include <unordered_map>
 
 Game* g_game = nullptr;
 
+// ---------------------------------------------------------------------------
+// Helpers mirroring the JS building auto-curve (Game.Object constructor,
+// id != 0 branch).
+// ---------------------------------------------------------------------------
+namespace {
+
+f64 niceRound(f64 v) {
+    if (v <= 0.0) return 0.0;
+    f64 digits = std::pow(10.0,
+        std::ceil(std::log(std::ceil(v)) / std::log(10.0)) / 100.0);
+    return std::floor(v / digits + 0.5) * digits; // JS Math.round
+}
+
+std::pair<f64,f64> buildingCurve(i32 n) {
+    // returns {basePrice, baseCps} for building index n (id != 0)
+    f64 baseCps = std::ceil(std::pow(static_cast<f64>(n),
+                                     static_cast<f64>(n) * 0.5 + 2.0) * 10.0) / 10.0;
+    baseCps = niceRound(baseCps);
+
+    f64 basePrice = (static_cast<f64>(n) + 9.0 +
+                     (n < 5 ? 0.0 : std::pow(static_cast<f64>(n) - 5.0, 1.75) * 5.0)) *
+                    std::pow(10.0, static_cast<f64>(n)) *
+                    std::max(1.0, static_cast<f64>(n) - 14.0);
+    basePrice = niceRound(basePrice);
+    if (n >= 16) basePrice *= 10.0;
+    return {basePrice, baseCps};
+}
+
+} // namespace
+
+namespace {
+
+// Strip trailing zeros (and a dangling decimal point) from a formatted number.
+std::string cleanNum(std::string s) {
+    size_t dot = s.find('.');
+    if (dot != std::string::npos) {
+        while (s.size() > dot + 1 && s.back() == '0') s.pop_back();
+        if (!s.empty() && s.back() == '.') s.pop_back();
+    }
+    return s;
+}
+
+// Insert thousands separators into the integer part of a number string.
+std::string commaInt(std::string s) {
+    size_t dot = s.find('.');
+    std::string intPart = (dot == std::string::npos) ? s : s.substr(0, dot);
+    std::string frac = (dot == std::string::npos) ? std::string() : s.substr(dot);
+    std::string out;
+    i32 count = 0;
+    for (i32 i = static_cast<i32>(intPart.size()) - 1; i >= 0; --i) {
+        if (count > 0 && count % 3 == 0) out.insert(out.begin(), ',');
+        out.insert(out.begin(), intPart[static_cast<size_t>(i)]);
+        ++count;
+    }
+    out += frac;
+    return out;
+}
+
+// Display formatting for cookie counts and prices (uppercase suffixes).
+std::string formatCookies(f64 v) {
+    if (v < 0.0) v = 0.0;
+    static const char* suf[] = {"", "K", "M", "B", "T", "Qa", "Qt", "Sx",
+                                "Sp", "Oc", "No"};
+    i32 s = 0;
+    f64 x = v;
+    while (x >= 1000.0 && s < 10) {
+        x /= 1000.0;
+        ++s;
+    }
+    char num[32];
+    if (s == 0) {
+        if (v < 1000.0)
+            std::snprintf(num, sizeof(num), "%.2f", v);
+        else
+            std::snprintf(num, sizeof(num), "%lld",
+                          static_cast<long long>(std::floor(v)));
+    } else {
+        std::snprintf(num, sizeof(num), "%.2f", x);
+    }
+    std::string out = commaInt(cleanNum(std::string(num)));
+    if (s > 0) out += suf[s];
+    return out;
+}
+
+} // namespace
+
+// ---------------------------------------------------------------------------
+// Game singleton
+// ---------------------------------------------------------------------------
 Game::Game() {
     g_game = this;
 }
@@ -19,16 +114,194 @@ void Game::launch() {
     fullDate = time;
     bakeryName = getBakeryName();
     seed = std::to_string(static_cast<i64>(time)); // placeholder seed
-    // TODO: load assets, init buildings/upgrades/achievements from PRESETS data
     ready = true;
 }
 
 void Game::load() {
-    // asset loading + data tables; called from window.onload analogue
-}
+    // --- Create the 18 buildings (mirrors JS Game.Object definitions) ---
+    auto addBuilding = [this](std::string name, std::string commonName,
+                              std::string desc, i32 icon, i32 iconColumn,
+                              Building::Art art, f64 price, f64 cps,
+                              std::function<void(Building*)> buyFunc,
+                              std::function<f64(Building*)> cpsFunc) {
+        auto b = std::make_unique<Building>(std::move(name), std::move(commonName),
+                                            std::move(desc), std::to_string(icon),
+                                            iconColumn, std::move(art), price, cps,
+                                            std::move(buyFunc));
+        b->cpsFunc = std::move(cpsFunc);
+        b->id = objectsN;
+        objectsById.push_back(b.get());
+        objects.push_back(std::move(b));
+        objectsN++;
+    };
 
-void Game::readyToLaunch() {
-    // end of init
+    // Cursor (id=0): explicit price/cps, curve not applied
+    addBuilding("Cursor", "cursor|cursors|clicked|[X] extra finger|[X] extra fingers",
+        "Autoclicks once every 10 seconds.", 0, 0, {}, 15.0, 0.1,
+        [](Building*) {
+            // unlock click upgrades at milestones (handled by Game)
+        },
+        [](Building* self) -> f64 {
+            Game* g = g_game;
+            f64 add = 0.0;
+            if (g->has("Thousand fingers")) add += 0.1;
+            if (g->has("Million fingers")) add += 0.5;
+            if (g->has("Billion fingers")) add += 5.0;
+            if (g->has("Trillion fingers")) add += 50.0;
+            if (g->has("Quadrillion fingers")) add += 500.0;
+            if (g->has("Quintillion fingers")) add += 5000.0;
+            if (g->has("Sextillion fingers")) add += 50000.0;
+            if (g->has("Septillion fingers")) add += 500000.0;
+            if (g->has("Octillion fingers")) add += 5000000.0;
+            i32 num = 0;
+            for (auto& b : g->objects) {
+                if (b->name != "Cursor") num += b->amount;
+            }
+            add = add * static_cast<f64>(num);
+            f64 mult = 1.0;
+            mult *= g->GetTieredCpsMult(self);
+            mult *= g->eff("cursorCps");
+            i32 clickUpgrades = (g->has("Reinforced index finger") ? 1 : 0) +
+                                (g->has("Carpal tunnel prevention cream") ? 1 : 0) +
+                                (g->has("Ambidextrous") ? 1 : 0);
+            return g->ComputeCps(0.1, clickUpgrades, add) * mult;
+        });
+
+    // Helper for standard buildings: cps = baseCps * tieredMult * magicCpS
+    auto standardCps = [](Building* self) -> f64 {
+        f64 mult = g_game->GetTieredCpsMult(self);
+        mult *= g_game->magicCpS(self->name);
+        return self->baseCps * mult;
+    };
+    auto standardBuy = [](Building*) {
+    };
+
+    // Grandma (id=1)
+    addBuilding("Grandma", "grandma|grandmas|baked|Grandmas are [X] year older|Grandmas are [X] years older",
+        "A nice grandma to bake more cookies.", 1, 1, {}, 100.0, 1.0, standardBuy,
+        [](Building* self) -> f64 {
+            Game* g = g_game;
+            f64 mult = 1.0;
+            if (g->has("Bingo center/Research facility")) mult *= 4.0;
+            if (g->has("Ritual rolling pins")) mult *= 2.0;
+            if (g->has("Naughty list")) mult *= 2.0;
+            if (g->has("Elderwort biscuits")) mult *= 1.02;
+            mult *= g->eff("grandmaCps");
+            mult *= g->GetTieredCpsMult(self);
+            f64 add = 0.0;
+            if (g->has("One mind")) add += self->amount * 0.02;
+            if (g->has("Communal brainsweep")) add += self->amount * 0.02;
+            if (g->has("Elder Pact")) {
+                if (auto* portal = g->getBuilding("Portal")) add += portal->amount * 0.05;
+            }
+            i32 numOthers = 0;
+            for (auto& b : g->objects) if (b->name != "Grandma") numOthers += b->amount;
+            mult *= 1.0 + g->auraMult("Elder Battalion") * 0.01 * static_cast<f64>(numOthers);
+            mult *= g->magicCpS(self->name);
+            return (self->baseCps + add) * mult;
+        });
+
+    // Create remaining buildings via the auto-curve
+    struct BuildingDef {
+        const char* name;
+        const char* commonName;
+        const char* desc;
+        i32 icon;
+        i32 iconColumn;
+        const char* artBase;
+        f64 artXV, artYV, artW;
+        i32 artRows, artX, artY;
+    };
+
+    static const BuildingDef defs[] = {
+        {"Farm", "farm|farms|harvested|[X] more acre|[X] more acres",
+         "Grows cookie plants from cookie seeds.", 3, 2, "farm", 8, 8, 64, 2, 0, 16},
+        {"Mine", "mine|mines|mined|[X] mile deeper|[X] miles deeper",
+         "Mines out cookie dough and chocolate chips.", 4, 3, "mine", 16, 16, 64, 2, 0, 24},
+        {"Factory", "factory|factories|mass-produced|[X] additional patent|[X] additional patents",
+         "Produces large quantities of cookies.", 5, 4, "factory", 8, 0, 64, 1, 0, -22},
+        {"Bank", "bank|banks|banked|Interest rates [X]% better|Interest rates [X]% better",
+         "Generates cookies from interest.", 6, 5, "bank", 8, 4, 56, 1, 0, 13},
+        {"Temple", "temple|temples|discovered|[X] sacred artifact retrieved|[X] sacred artifacts retrieved",
+         "Full of precious, ancient chocolate.", 7, 6, "temple", 8, 4, 72, 2, 0, -5},
+        {"Wizard tower", "wizard tower|wizard towers|summoned|Incantations have [X] more syllable|Incantations have [X] more syllables",
+         "Summons cookies with magic spells.", 8, 7, "wizardtower", 16, 16, 48, 2, 0, 20},
+        {"Shipment", "shipment|shipments|shipped|[X] galaxy fully explored|[X] galaxies fully explored",
+         "Brings in fresh cookies from the cookie planet.", 9, 8, "shipment", 16, 16, 64, 1, 0, 0},
+        {"Alchemy lab", "alchemy lab|alchemy labs|transmuted|[X] primordial element mastered|[X] primordial elements mastered",
+         "Turns gold into cookies!", 10, 6, "alchemylab", 16, 16, 64, 2, 0, 16},
+        {"Portal", "portal|portals|retrieved|[X] dimension enslaved|[X] dimensions enslaved",
+         "Opens a door to the Cookieverse.", 11, 7, "portal", 32, 32, 64, 2, 0, 0},
+        {"Time machine", "time machine|time machines|recovered|[X] century secured|[X] centuries secured",
+         "Brings cookies from the past, before they were even eaten.", 12, 8, "timemachine", 32, 32, 64, 1, 0, 0},
+        {"Antimatter condenser", "antimatter condenser|antimatter condensers|condensed|[X] extra quark flavor|[X] extra quark flavors",
+         "Condenses the antimatter in the universe into cookies.", 13, 13, "antimattercondenser", 0, 64, 64, 1, 0, 0},
+        {"Prism", "prism|prisms|converted|[X] new color discovered|[X] new colors discovered",
+         "Converts light itself into cookies.", 14, 14, "prism", 16, 4, 64, 1, 0, 20},
+        {"Chancemaker", "chancemaker|chancemakers|spontaneously generated|Chancemakers are powered by [X]-leaf clovers|Chancemakers are powered by [X]-leaf clovers",
+         "Generates cookies out of thin air through sheer luck.", 15, 19, "chancemaker", 8, 64, 64, 1, 0, 0},
+        {"Fractal engine", "fractal engine|fractal engines|iterated|[X] more dimension|[X] more dimensions",
+         "Turns the universe into a fractal cookie.", 16, 20, "fractalEngine", 8, 64, 64, 1, 0, 0},
+        {"Javascript console", "javascript console|javascript consoles|coded|[X] more line of code|[X] more lines of code",
+         "Runs the game itself, but slower.", 17, 21, "javascriptconsole", 16, 16, 64, 1, 0, 0},
+        {"Idleverse", "idleverse|idleverses|idled|[X] more universe|[X] more universes",
+         "Generates cookies from nothing at all.", 18, 22, "idleverse", 16, 16, 64, 1, 0, 0},
+    };
+
+    for (i32 i = 0; i < 16; ++i) {
+        const BuildingDef& d = defs[i];
+        i32 id = i + 2; // Cursor=0, Grandma=1, so Farm starts at id=2
+        auto curve = buildingCurve(id);
+        Building::Art art;
+        art.base = d.artBase;
+        art.pic = std::string(d.artBase) + ".png";
+        art.bg = std::string(d.artBase) + "Background.png";
+        art.xV = d.artXV; art.yV = d.artYV; art.w = d.artW;
+        art.rows = d.artRows; art.x = d.artX; art.y = d.artY;
+        addBuilding(d.name, d.commonName, d.desc, d.icon, d.iconColumn,
+                    art, curve.first, curve.second, standardBuy, standardCps);
+    }
+
+    // Cursor unlocked by default (matches JS Game.Object: this.locked=false for Cursor)
+    objects[0]->locked = false;
+
+    // --- wrinklers: 12 fixed slots (JS Game.wrinklers, getWrinklersMax base 10) ---
+    wrinklers.reserve(12);
+    for (i32 i = 0; i < 12; ++i) {
+        Wrinkler w;
+        w.id = i;
+        w.phase = 0;
+        w.close = 0;
+        w.sucked = 0.0;
+        w.hp = wrinklerHP;
+        w.selected = 0;
+        w.type = 0;
+        wrinklers.push_back(w);
+    }
+
+    // --- buff type registry (JS Game.buffTypes, registration order = id) ---
+    auto regBuff = [this](const std::string& name) {
+        auto t = std::make_shared<BuffType>();
+        t->name = name;
+        t->id = static_cast<i32>(buffTypes.size());
+        t->vanilla = true;
+        buffTypes[t->id] = t;
+    };
+    regBuff("frenzy");
+    regBuff("blood frenzy");      // shown as "Elder frenzy"
+    regBuff("clot");
+    regBuff("dragon harvest");
+    regBuff("everything must go");
+    regBuff("cursed finger");
+    regBuff("click frenzy");
+    regBuff("dragonflight");
+    regBuff("cookie storm");
+    regBuff("building buff");     // dynamic golden-cookie building buff
+    regBuff("building debuff");   // dynamic golden-cookie building debuff
+    regBuff("sugar blessing");
+    regBuff("haggler luck");
+    regBuff("haggler misery");
+    regBuff("pixie luck");        // shown as "Crafty pixies"
 }
 
 void Game::loop() {
@@ -37,9 +310,7 @@ void Game::loop() {
     time = now;
     if (dt > 0.25) dt = 0.25; // spiral-of-death clamp
     logic(dt);
-    draw();
     loopT++;
-    drawT++;
 }
 
 void Game::logic(f64 dt) {
@@ -55,11 +326,286 @@ void Game::logic(f64 dt) {
     updateSpecial();
     updateGrandmapocalypse();
     particlesUpdate();
+
+    // big cookie animation — wobble between 90% and 120% of size
+    if (bigCookieState == 1) bigCookieSizeT = 0.9;
+    else if (bigCookieState == 2) bigCookieSizeT = 1.2;
+    else bigCookieSizeT = 1.0;
+    bigCookieSizeD += (bigCookieSizeT - bigCookieSize) * 0.75;
+    bigCookieSizeD *= 0.75;
+    bigCookieSize += bigCookieSizeD;
+    bigCookieSize = std::max(0.1, bigCookieSize);
+
+    // milk progress
+    milkProgress = static_cast<f64>(achievementsOwned) / 25.0;
+    milkHd += (milkH - milkHd) * 0.02;
+
+    // research
+    if (researchT > 0) researchT--;
+    if (researchT == 0 && nextResearch != 0) {
+        for (auto& u : upgrades) {
+            if (u && u->id == nextResearch) {
+                if (!u->bought) {
+                    u->unlocked = true;
+                    recalculateGains_ = true;
+                }
+                break;
+            }
+        }
+        nextResearch = 0;
+        researchT = -1;
+    }
+
+    // seasons
+    if (seasonT > 0) seasonT--;
+    if (seasonT <= 0 && !season.empty() && season != baseSeason) {
+        season = baseSeason;
+        seasonT = -1;
+    }
+
+    // handle cookies: earn cookiesPs / fps per frame
+    earn(cookiesPs / static_cast<f64>(fps));
+
+    // minigames
+    for (auto& b : objects) {
+        if (b->minigameLoaded && b->minigame) {
+            // b->minigame->logic(); // stubbed
+        }
+    }
+
+    // wrinklers
+    if (cpsSucked > 0.0) {
+        f64 sucked = (cookiesPs / static_cast<f64>(fps)) * cpsSucked;
+        dissolve(sucked);
+        cookiesSucked += sucked;
+    }
+
+    // totalCookies accumulation
+    for (auto& b : objects) {
+        b->totalCookies += (b->storedTotalCps * globalCpsMult) / static_cast<f64>(fps);
+    }
+
+    // recalculate CpS every 10 seconds (for dynamic boosts such as Century egg)
+    if (loopT % (fps * 10) == 0) recalculateGains_ = true;
+
+    // unlocking / achievement checks every ~5 seconds
+    if (loopT % (fps * 5) == 0 && objectsById.size() > 0) {
+        if (std::isnan(cookies)) { cookies = 0.0; cookiesEarned = 0.0; recalculateGains_ = true; }
+
+        f64 timePlayed = now_ms() - startDate;
+
+        if (cookiesEarned >= 1000000.0 && (ascendTimer > 0.0 || resets == 0)) {
+            if (timePlayed <= 1000.0 * 60.0 * 35.0) { /* Win('Speed baking I') */ }
+            if (timePlayed <= 1000.0 * 60.0 * 25.0) { /* Win('Speed baking II') */ }
+            if (timePlayed <= 1000.0 * 60.0 * 15.0) { /* Win('Speed baking III') */ }
+            if (cookieClicks <= 15) { /* Win('Neverclick') */ }
+            if (cookieClicks <= 0) { /* Win('True Neverclick') */ }
+            if (cookiesEarned >= 1000000000.0 && upgradesOwned == 0) { /* Win('Hardcore') */ }
+        }
+
+        i32 buildingsOwned = 0;
+        i32 minAmount = 100000;
+        for (auto& b : objects) {
+            buildingsOwned += b->amount;
+            minAmount = std::min(b->amount, minAmount);
+        }
+        if (buildingsOwned >= 100) { /* Win('Builder') */ }
+        if (buildingsOwned >= 500) { /* Win('Architect') */ }
+        if (buildingsOwned >= 1000) { /* Win('Engineer') */ }
+        if (buildingsOwned >= 2000) { /* Win('Lord of Constructs') */ }
+
+        if (handmadeCookies >= 1000.0) { /* Win('Clicktastic'); Unlock('Plastic mouse'); */ }
+        if (handmadeCookies >= 100000.0) { /* Win('Clickathlon'); Unlock('Iron mouse'); */ }
+        if (handmadeCookies >= 10000000.0) { /* Win('Clickolympics'); Unlock('Titanium mouse'); */ }
+        if (handmadeCookies >= 1000000000.0) { /* Win('Clickorama'); Unlock('Adamantium mouse'); */ }
+    }
+
+    // autosave every 60 seconds
+    if ((loopT % (fps * 60) == 0 && loopT > fps * 10) || toSave) {
+        toSave = false;
+        writeSave();
+    }
+
+    // purchase flash feedback
+    if (flashFrames > 0) --flashFrames;
+
+    loopT++;
 }
 
 void Game::draw() {
-    // TODO: ImGui + OpenGL rendering of cookie panel, store, etc.
-    (void)0;
+    drawT++;
+
+    i32 w = Render::windowW();
+    i32 h = Render::windowH();
+
+    // background (matches body background: bgBlue.png)
+    // NOTE: pass "bgBlue.png" (no "img/" prefix) — resolveAssetPath() already
+    // prepends kImgDir which ends in "/img", so "img/bgBlue.png" would produce
+    // a double "img/img/" path and fail to load.
+    static i32 bgTex = Render::loadTexture("bgBlue.png");
+    Render::drawTexture(bgTex, 0, 0, static_cast<f32>(w), static_cast<f32>(h), 0xFFFFFFFF);
+
+    // ------------------------------------------------------------------
+    // Left panel: #sectionLeft  (width 30%, cookie panel)
+    // ------------------------------------------------------------------
+    i32 leftW = static_cast<i32>(static_cast<f32>(w) * 0.30f);
+
+    // cookie count (#cookies title, top 10%, centered)
+    std::string cookieStr = formatCookies(cookies);
+    f32 cw = Render::measureText(cookieStr.c_str(), 1.5f);
+    Render::drawText(static_cast<f32>(leftW / 2) - cw / 2,
+                     static_cast<f32>(h * 0.10f) - 10.0f,
+                     cookieStr.c_str(), 0xFFFFFFFF, 1.5f);
+
+    // bakery name (#bakeryName, top 10%)
+    std::string bakery = getBakeryName();
+    f32 bw = Render::measureText(bakery.c_str(), 1.0f);
+    Render::drawText(static_cast<f32>(leftW / 2) - bw / 2,
+                     static_cast<f32>(h * 0.10f) + 30.0f,
+                     bakery.c_str(), 0xCCCCCCFF, 1.0f);
+
+    // CPS (#cookies-style line below bakery name)
+    std::string cpsStr = formatCookies(cookiesPs) + " /s";
+    f32 cw2 = Render::measureText(cpsStr.c_str(), 0.8f);
+    Render::drawText(static_cast<f32>(leftW / 2) - cw2 / 2,
+                     static_cast<f32>(h * 0.10f) + 46.0f,
+                     cpsStr.c_str(), 0xAAAAFFFF, 0.8f);
+
+    // big cookie (#cookieAnchor: left 50%, top 40%; #bigCookie 256x256)
+    static i32 cookieTex = Render::loadTexture("perfectCookie.png");
+    i32 cx = leftW / 2;
+    i32 cy = static_cast<i32>(h * 0.40f);
+    f64 size = bigCookieSize;
+    if (size < 0.4) size = 0.4;
+    i32 cr = static_cast<i32>(128.0 * size); // half of 256px cookie
+    Render::drawTexture(cookieTex,
+                        static_cast<f32>(cx - cr), static_cast<f32>(cy - cr),
+                        static_cast<f32>(cr) * 2.0f, static_cast<f32>(cr) * 2.0f,
+                        0xFFFFFFFF);
+    Render::registerCookie(static_cast<f32>(cx), static_cast<f32>(cy),
+                           static_cast<f32>(cr));
+
+    // ------------------------------------------------------------------
+    // Right panel: #sectionRight / #store  (rightmost ~318px)
+    // ------------------------------------------------------------------
+    i32 storeW = 318;
+    i32 sx = w - storeW;
+    if (sx < leftW) sx = leftW; // guard for narrow windows
+
+    // store panel background (matches #sectionRight: rgba(0,0,0,0.5))
+    Render::drawRect(static_cast<f32>(sx), 0.0f,
+                     static_cast<f32>(storeW), static_cast<f32>(h),
+                     0x00000080);
+    Render::drawRect(static_cast<f32>(sx), 0.0f, 1.0f, static_cast<f32>(h),
+                     0x4A4A60FF);
+
+    // store title (#storeTitle)
+    Render::drawText(static_cast<f32>(sx + 16), 48.0f, "STORE",
+                     0xFFFFFFFF, 1.5f);
+
+    i32 rowY = 112; // below the store title
+    i32 row = 0;
+    for (auto& b : objects) {
+        if (!b) continue;
+        if (rowY + 64 > h) break; // don't draw past the bottom
+
+        bool flashing = (flashBuildingIndex == row && flashFrames > 0);
+
+        // store tile background (storeTile.png, 300x256 = 4 strips of 64px).
+        // Each row is a "cell" using one horizontal strip of the tile sheet.
+        static i32 storeTileTex = Render::loadTexture("storeTile.png");
+        bool canAfford = cookies >= b->getPrice();
+        // Permanent unlock: lifetime cookies earned >= base price (JS: Game.ObjectsById[i].unlock())
+        if (!b->locked && cookiesEarned >= b->basePrice) {
+            // already unlocked, keep unlocked
+        } else if (cookiesEarned >= b->basePrice) {
+            b->locked = false;
+        }
+        bool isLocked = b->locked;
+        bool isEnabled = canAfford && !isLocked;
+        u32 tileColor = (flashing || isEnabled) ? 0xFFFFFFFF : 0x555555FF;
+        f32 stripY = static_cast<f32>((row % 4) * 64);
+        // Draw the 300px-wide tile strip at its natural width (centered in the row).
+        f32 cellX = static_cast<f32>(sx) + (static_cast<f32>(storeW) - 300.0f) / 2.0f;
+        Render::drawTexture(storeTileTex,
+                            cellX, static_cast<f32>(rowY),
+                            300.0f, 64.0f, tileColor,
+                            0.0f, stripY, 300.0f, 64.0f);
+
+        // building icon (64x64) — only visible when unlocked (CSS: .product.unlocked .icon {opacity:1})
+        if (!isLocked) {
+            std::string iconBase = b->art.base.empty() ? b->name : b->art.base;
+            for (auto& c : iconBase)
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            std::string iconPath = iconBase + ".png";
+            static std::unordered_map<std::string, i32> iconTexCache;
+            i32 iconHandle = 0;
+            auto itc = iconTexCache.find(iconPath);
+            if (itc != iconTexCache.end()) {
+                iconHandle = itc->second;
+            } else {
+                iconHandle = Render::loadTexture(iconPath);
+                iconTexCache[iconPath] = iconHandle;
+            }
+            // cursor.png is a 2x2 sprite sheet of 4 cursors (64x64 total).
+            // Show only the top-left quadrant (white index finger, 32x32),
+            // stretched to fill the 64x64 icon slot.
+            f32 srcX = 0.0f, srcY = 0.0f, srcW = 0.0f, srcH = 0.0f; // 0 = full texture
+            if (iconPath == "cursor.png") {
+                srcX = 0.0f; srcY = 0.0f; srcW = 32.0f; srcH = 32.0f;
+            }
+            Render::drawTexture(iconHandle,
+                                static_cast<f32>(sx), static_cast<f32>(rowY),
+                                64.0f, 64.0f, 0xFFFFFFFF,
+                                srcX, srcY, srcW, srcH);
+        }
+
+        // building name (.product .content, left 64px) — "???" when locked
+        // CSS: .product.locked .title {display:none;} .product.locked .lockedTitle {display:block;}
+        std::string displayName = isLocked ? "???" : b->name;
+        u32 nameColor = isEnabled ? 0xFFFFFFFF : 0x888888FF;
+        Render::drawText(static_cast<f32>(sx + 72),
+                         static_cast<f32>(rowY + 8), displayName.c_str(),
+                         nameColor, 0.9f);
+
+        // price (.price: green #6f6 when affordable, red #f66 when locked/unaffordable)
+        // CSS: .price {color:#6f6;} .price.disabled {color:#f66;}
+        std::string priceStr = formatCookies(b->getPrice());
+        f32 pw = Render::measureText(priceStr.c_str(), 0.9f);
+        u32 priceColor = isEnabled ? 0x6FFF6FFF : 0xFF6666FF;
+        Render::drawText(static_cast<f32>(sx + storeW - 76) - pw,
+                         static_cast<f32>(rowY + 8), priceStr.c_str(),
+                         priceColor, 0.9f);
+
+        // big faded amount-owned (.product .content .owned)
+        // Repositioned per Image 1: bottom-right corner of the cell (right:12px),
+        // below the price line, so the owned count reads as a faded corner label
+        // separate from the building name / price at the top of the cell.
+        // Scale bumped up from 0.9f to 1.5f per request (~24px).
+        if (b->amount > 0) {
+            std::string ownedStr = std::to_string(b->amount);
+            const f32 scale = 1.5f; // ~24px owned amount, fits bottom-right cell corner
+            f32 ow = Render::measureText(ownedStr.c_str(), scale);
+            // right edge of the 300px cell, minus 12px margin, minus text width
+            f32 ownedX = cellX + 300.0f - 12.0f - ow;
+            // vertically centre the digit inside the 64px-tall cell
+            Render::drawText(ownedX,
+                             static_cast<f32>(rowY + 32 + static_cast<int>(8 * scale)), ownedStr.c_str(),
+                             0x00000066, scale);
+        }
+
+        // Click anywhere in the row to buy (no separate BUY button).
+        Render::registerButton(1000 + row, static_cast<f32>(sx),
+                               static_cast<f32>(rowY),
+                               static_cast<f32>(storeW), 64.0f);
+
+        // Cell separator line between rows (grid of cells effect).
+        Render::drawRect(static_cast<f32>(sx), static_cast<f32>(rowY + 64),
+                         static_cast<f32>(storeW), 1.0f, 0x4A4A60FF);
+
+        rowY += 72; // 64px tile + 8px gap
+        ++row;
+    }
 }
 
 void Game::earn(f64 howmuch) {
@@ -84,19 +630,66 @@ f64 Game::mouseCps() {
     if (has("Million fingers")) add += 0.5;
     if (has("Billion fingers")) add += 5.0;
     if (has("Trillion fingers")) add += 50.0;
+    if (has("Quadrillion fingers")) add += 500.0;
+    if (has("Quintillion fingers")) add += 5000.0;
+    if (has("Sextillion fingers")) add += 50000.0;
+    if (has("Septillion fingers")) add += 500000.0;
+    if (has("Octillion fingers")) add += 5000000.0;
+
     i32 num = 0;
     for (auto& b : objects) num += b->amount;
     if (auto* cur = getBuilding("Cursor")) num -= cur->amount;
-    add *= static_cast<f64>(num);
+    add = add * static_cast<f64>(num);
+
+    if (has("Plastic mouse")) add += cookiesPs * 0.01;
+    if (has("Iron mouse")) add += cookiesPs * 0.01;
+    if (has("Titanium mouse")) add += cookiesPs * 0.01;
+    if (has("Adamantium mouse")) add += cookiesPs * 0.01;
+    if (has("Unobtainium mouse")) add += cookiesPs * 0.01;
+    if (has("Eludium mouse")) add += cookiesPs * 0.01;
+    if (has("Wishalloy mouse")) add += cookiesPs * 0.01;
+    if (has("Fantasteel mouse")) add += cookiesPs * 0.01;
+    if (has("Nevercrack mouse")) add += cookiesPs * 0.01;
+    if (has("Armythril mouse")) add += cookiesPs * 0.01;
+    if (has("Technobsidian mouse")) add += cookiesPs * 0.01;
+    if (has("Plasmarble mouse")) add += cookiesPs * 0.01;
+
+    if (has("Fortune #104")) add += cookiesPs * 0.01;
 
     f64 mult = 1.0;
     for (auto& cb : customMouseCps) mult += cb();
-    for (auto& cb : customMouseCpsMult) mult *= cb();
 
     if (has("Santa's helpers")) mult *= 1.1;
     if (has("Cookie egg")) mult *= 1.1;
+    if (has("Halo gloves")) mult *= 1.1;
     mult *= eff("click");
-    return mult * add;
+
+    i32 godLvl = getGodLevel("labor");
+    if (godLvl == 1) mult *= 1.15;
+    else if (godLvl == 2) mult *= 1.1;
+    else if (godLvl == 3) mult *= 1.05;
+
+    for (auto& bf : buffs) {
+        // buff multClick would go here (stubbed)
+        (void)bf;
+    }
+
+    mult *= 1.0 + auraMult("Dragon Cursor") * 0.05;
+
+    for (auto& cb : customMouseCpsMult) mult *= cb();
+
+    i32 clickUpgrades = (has("Reinforced index finger") ? 1 : 0) +
+                        (has("Carpal tunnel prevention cream") ? 1 : 0) +
+                        (has("Ambidextrous") ? 1 : 0);
+    f64 out = mult * ComputeCps(1.0, clickUpgrades, add);
+
+    // Cursed finger override
+    for (auto& bf : buffs) {
+        // if buff is Cursed finger, out = buff.power (stubbed)
+        (void)bf;
+    }
+
+    return out;
 }
 
 void Game::clickCookie(i32 amount) {
@@ -108,15 +701,210 @@ void Game::clickCookie(i32 amount) {
     earn(amt);
     handmadeCookies += amt;
     cookieClicks++;
-    // TODO: particles, sound
+    bigCookieSizeT = 1.2;   // pop to 120% on click
+    bigCookieSizeD += 0.3;  // upward velocity for the bounce
+}
+
+
+f64 Game::ComputeCps(f64 baseCps, i32 clickUpgrades, f64 add) {
+    return baseCps * (1.0 + static_cast<f64>(clickUpgrades) * 0.01) + add;
+}
+
+void Game::buyBuilding(Building* b, i32 amount) {
+    if (!b) return;
+    if (amount <= 0) amount = 1;
+    i32 idx = -1;
+    for (i32 i = 0; i < objectsN; ++i) {
+        if (objects[i].get() == b) {
+            idx = i;
+            break;
+        }
+    }
+    bool boughtAny = false;
+    for (i32 i = 0; i < amount; ++i) {
+        f64 price = b->getPrice();
+        if (cookies < price) break;
+        spend(price);
+        b->buy(1);
+        buildingsOwned++;
+        recalculateGains_ = true;
+        boughtAny = true;
+    }
+    if (boughtAny && idx >= 0) {
+        flashBuildingIndex = idx;
+        flashFrames = 12; // ~0.4s at 30 FPS
+    }
+}
+
+void Game::sellBuilding(Building* b, i32 amount) {
+    if (!b) return;
+    if (amount == -1) amount = b->amount;
+    if (amount <= 0) amount = 1;
+    f64 total = 0.0;
+    for (i32 i = 0; i < amount; ++i) {
+        if (b->amount <= 0) break;
+        f64 price = b->getPrice();
+        f64 giveBack = b->getSellMultiplier();
+        f64 back = std::floor(price * giveBack);
+        total += back;
+        b->sell(1);
+        buildingsOwned--;
+    }
+    earn(total);
+    recalculateGains_ = true;
 }
 
 void Game::calculateGains() {
-    // TODO: full port of Game.CalculateGains (building CpS + mults + buffs)
+    recalculateGains_ = false;
+
     cookiesPs = 0.0;
-    for (auto& b : objects) {
-        cookiesPs += b->amount * b->cps;
+    f64 mult = 1.0;
+
+    // --- prestige multiplier ---
+    if (ascendTimer <= 0.0) {
+        mult += prestige * 0.01 * heavenlyPower * GetHeavenlyMultiplier();
     }
+
+    mult *= eff("cps");
+
+    // --- heralds ---
+    if (has("Heralds") && ascendTimer <= 0.0) {
+        mult *= 1.0 + 0.01 * static_cast<f64>(heralds);
+    }
+
+    // --- specific cookie upgrades ---
+    if (has("Specialized chocolate chips")) mult *= 1.01;
+    if (has("Designer cocoa beans")) mult *= 1.02;
+    if (has("Underworld ovens")) mult *= 1.03;
+    if (has("Exotic nuts")) mult *= 1.04;
+    if (has("Arcane sugar")) mult *= 1.05;
+
+    if (has("Increased merriness")) mult *= 1.15;
+    if (has("Improved jolliness")) mult *= 1.15;
+    if (has("A lump of coal")) mult *= 1.01;
+    if (has("An itchy sweater")) mult *= 1.01;
+    if (has("Santa's dominion")) mult *= 1.2;
+
+    if (has("Fortune #100")) mult *= 1.01;
+    if (has("Fortune #101")) mult *= 1.07;
+
+    if (has("Santa's legacy")) mult *= 1.0 + static_cast<f64>(santaLevel + 1) * 0.03;
+
+    // --- building CpS ---
+    for (auto& b : objects) {
+        f64 storedCps;
+        if (b->cpsFunc) {
+            storedCps = b->cpsFunc(b.get());
+        } else {
+            storedCps = b->baseCps;
+        }
+        if (ascendTimer <= 0.0) {
+            storedCps *= (1.0 + static_cast<f64>(b->level) * 0.01);
+        }
+        b->storedCps = storedCps;
+        b->storedTotalCps = static_cast<f64>(b->amount) * storedCps;
+        cookiesPs += b->storedTotalCps;
+    }
+
+    // --- "egg" building ---
+    if (has("\"egg\"")) { cookiesPs += 9.0; }
+
+    // --- milk / kittens ---
+    milkProgress = static_cast<f64>(achievementsOwned) / 25.0;
+    f64 milkMult = 1.0;
+    if (has("Santa's milk and cookies")) milkMult *= 1.05;
+    milkMult *= 1.0 + auraMult("Breath of Milk") * 0.05;
+    milkMult *= eff("milk");
+
+    f64 catMult = 1.0;
+    if (has("Kitten helpers")) catMult *= (1.0 + milkProgress * 0.1 * milkMult);
+    if (has("Kitten workers")) catMult *= (1.0 + milkProgress * 0.125 * milkMult);
+    if (has("Kitten engineers")) catMult *= (1.0 + milkProgress * 0.15 * milkMult);
+    if (has("Kitten overseers")) catMult *= (1.0 + milkProgress * 0.175 * milkMult);
+    if (has("Kitten managers")) catMult *= (1.0 + milkProgress * 0.2 * milkMult);
+    if (has("Kitten accountants")) catMult *= (1.0 + milkProgress * 0.2 * milkMult);
+    if (has("Kitten specialists")) catMult *= (1.0 + milkProgress * 0.2 * milkMult);
+    if (has("Kitten experts")) catMult *= (1.0 + milkProgress * 0.2 * milkMult);
+    if (has("Kitten consultants")) catMult *= (1.0 + milkProgress * 0.2 * milkMult);
+    if (has("Kitten assistants to the regional manager")) catMult *= (1.0 + milkProgress * 0.175 * milkMult);
+    if (has("Kitten marketeers")) catMult *= (1.0 + milkProgress * 0.15 * milkMult);
+    if (has("Kitten analysts")) catMult *= (1.0 + milkProgress * 0.125 * milkMult);
+    if (has("Kitten executives")) catMult *= (1.0 + milkProgress * 0.115 * milkMult);
+    if (has("Kitten angels")) catMult *= (1.0 + milkProgress * 0.1 * milkMult);
+    if (has("Fortune #103")) catMult *= (1.0 + milkProgress * 0.05 * milkMult);
+
+    mult *= catMult;
+
+    // --- eggs ---
+    f64 eggMult = 1.0;
+    if (has("Chicken egg")) eggMult *= 1.01;
+    if (has("Duck egg")) eggMult *= 1.01;
+    if (has("Turkey egg")) eggMult *= 1.01;
+    if (has("Quail egg")) eggMult *= 1.01;
+    if (has("Robin egg")) eggMult *= 1.01;
+    if (has("Ostrich egg")) eggMult *= 1.01;
+    if (has("Cassowary egg")) eggMult *= 1.01;
+    if (has("Salmon roe")) eggMult *= 1.01;
+    if (has("Frogspawn")) eggMult *= 1.01;
+    if (has("Shark egg")) eggMult *= 1.01;
+    if (has("Turtle egg")) eggMult *= 1.01;
+    if (has("Ant larva")) eggMult *= 1.01;
+    if (has("Century egg")) {
+        f64 day = std::floor((now_ms() - startDate) / 1000.0 / 10.0) * 10.0 / 60.0 / 60.0 / 24.0;
+        day = std::min(day, 100.0);
+        eggMult *= 1.0 + (1.0 - std::pow(1.0 - day / 100.0, 3.0)) * 0.1;
+    }
+    mult *= eggMult;
+
+    // --- sugar baking ---
+    if (has("Sugar baking")) mult *= (1.0 + std::min(100.0, lumps) * 0.01);
+
+    // --- auras ---
+    mult *= 1.0 + auraMult("Radiant Appetite");
+
+    f64 rawCookiesPs = cookiesPs * mult;
+    (void)rawCookiesPs; // CPS achievements check stubbed
+
+    // --- bakery name easter eggs ---
+    std::string name = bakeryName;
+    for (auto& c : name) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (name == "orteil") mult *= 0.99;
+    else if (name == "ortiel") mult *= 0.98;
+
+    // --- wrinklers ---
+    i32 sucking = 0;
+    for (auto& w : wrinklers) if (w.phase == 2) ++sucking;
+    f64 suckRate = 1.0 / 20.0;
+    suckRate *= eff("wrinklerEat");
+    cpsSucked = static_cast<f64>(sucking) * suckRate;
+
+    if (has("Elder Covenant")) mult *= 0.95;
+
+    if (has("Golden switch [off]")) {
+        f64 goldenSwitchMult = 1.5;
+        if (has("Residual luck")) {
+            // goldenCookieUpgrades would be checked here (stubbed)
+        }
+        mult *= goldenSwitchMult;
+    }
+    if (has("Shimmering veil [off]")) {
+        f64 veilMult = 0.5;
+        if (has("Reinforced membrane")) veilMult += 0.1;
+        mult *= 1.0 + veilMult;
+    }
+    if (has("Magic shenanigans")) mult *= 1000.0;
+    if (has("Occult obstruction")) mult *= 0.0;
+
+    // --- buffs (multCpS) ---
+    for (auto& bf : buffs) {
+        (void)bf;
+    }
+
+    unbuffedCps = cookiesPs * mult;
+    globalCpsMult = mult;
+    cookiesPs *= globalCpsMult;
+
+    computedMouseCps = mouseCps();
 }
 
 bool Game::has(const std::string& name) const {
@@ -127,6 +915,10 @@ bool Game::has(const std::string& name) const {
 bool Game::hasAchiev(const std::string& name) const {
     for (auto& a : achievements) if (a && a->name == name) return a->won;
     return false;
+}
+
+i32 Game::getGodLevel(const std::string& /*name*/) const {
+    return 0; // pantheon not implemented yet
 }
 
 void Game::unlock(const std::string& name) {
@@ -142,7 +934,7 @@ std::string Game::getBakeryName() {
     return "Cookie Bakery";
 }
 
-void Game::updateSpecial() { /* TODO */ }
+void Game::updateSpecial() { /* TODO: special menu / news ticker */ }
 void Game::updateGrandmapocalypse() { /* TODO */ }
 void Game::particlesUpdate() { /* TODO */ }
 void Game::textParticlesUpdate() { /* TODO */ }
@@ -151,6 +943,25 @@ f64 Game::eff(const std::string& name, f64 def) {
     auto it = effs_.find(name);
     return (it != effs_.end()) ? it->second : def;
 }
+
+f64 Game::GetTieredCpsMult(Building* /*me*/) {
+    return 1.0; // tiered upgrades not implemented yet
+}
+
+f64 Game::magicCpS(const std::string& /*name*/) {
+    return 1.0; // magic (grimoire) not implemented yet
+}
+
+f64 Game::auraMult(const std::string& /*name*/) {
+    return 0.0; // dragon auras not implemented yet
+}
+
+f64 Game::GetHeavenlyMultiplier() {
+    return 1.0; // prestige not implemented yet
+}
+
+void Game::updateShimmers() { /* TODO */ }
+void Game::updateBuffs() { /* TODO */ }
 
 std::string Game::writeSave(i32 type) { return SaveLoad::writeSave(*this, type); }
 bool Game::loadSave(const std::string& data) { return SaveLoad::loadSave(*this, data); }
