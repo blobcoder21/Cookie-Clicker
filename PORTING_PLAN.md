@@ -144,7 +144,15 @@ Cookie-Clicker/
 
 4. **Timing / main loop**: JS uses `setTimeout(Game.Loop, 1000/Game.fps)` (~30 FPS). In C++ use a fixed timestep with `std::chrono::steady_clock` + `std::this_thread::sleep_for`, or render on vsync and accumulate delta seconds for `Game.Logic(dt)`. Offline progress (cookies earned while closed) is computed from wall-clock delta on load (`Date.now()` → `std::chrono::system_clock`).
 
-5. **UI**: Dear ImGui is the closest equivalent to the JS/DOM approach — immediate mode, dynamic layout, easy to rebuild the store rows, cookie panel, and menus. Canvas background can be rendered with OpenGL via ImGui's backend or a small software renderer; shimmers/particles can be drawn as quads or textured sprites.
+5. **UI layer separation (extraction goal)**: Split UI/layout out of `Game` into a separate `UI` layer so the core is portable to DSi/3DS without remaking UI.
+   - **Rule 1**: `Game` has **no `draw()` function** and includes **no `Render` or `UI` headers**. Core compiles with only logic headers on the include path.
+   - **Rule 2**: `UI` takes `const Game&` and `Render&`, owns **all** layout, drawing, and hit-testing.
+   - **Rule 3**: Input goes `UI::on_pointer(x, y)` → returns a game action → main loop applies it to `Game`.
+   - **Rule 4**: All layout numbers live in a `Layout` struct, **not** inline in draw code.
+   - **Rule 5**: Behaviour and visuals must be **pixel-identical** to now — this is a pure refactor, no visual change.
+   - **Rule 6**: Verify that the logic target compiles with only the logic headers on the include path.
+
+   This lets the PC port use a single-screen layout (cookie panel left, store right) while a DS/Dsi port can reuse the same `UI` logic with a two-screen layout — only `Render` is rewritten per platform.
 
 6. **Audio**: SDL_mixer or miniaudio for MP3/WAV playback with volume and concurrent instances (the JS uses 12 sound-instance channels).
 
@@ -212,6 +220,7 @@ Then `utf8_to_b64(str) + '!END!'` → `escape()` for disk. The C++ port must par
 3. **Economy & logic**: `CalculateGains`, `Earn/Spend`, `mouseCps`, `ClickCookie`, building purchase, `Game.Logic(dt)` fixed-timestep.
 4. **Save/Load**: replicate exact format; file-based persistence; verify a browser-made save loads and a C++-made save can be imported into the browser.
 5. **UI**: cookie panel, store rows, upgrades panel, stats/legacy/options menus, tooltips, prompts/notifications.
+   - Before fleshing out upgrades/stats/legacy panels, **extract the UI layer** per the rules in §3 (decision 5): move all layout out of `Game::draw()` into a `UI` class taking `const Game&` and `Render&`, with all layout numbers in a `Layout` struct. This is a pure refactor — visuals must remain pixel-identical. Once extracted, add new panels (upgrades, stats, legacy, options) to the `UI` layer, not to `Game`.
 6. **Rendering**: background canvas equivalent, particles, shimmers (golden cookies).
 7. **Audio**: load & play the MP3 SFX; volume control.
 8. **Minigames**: Garden → Grimoire → Pantheon → Dungeons (optional, last).
@@ -236,7 +245,7 @@ The following rendering bugs were fixed and verified (build + run, exit 124 from
 - **Background**: `Game::draw()` draws `img/bgBlue.png` full-screen instead of a dark rect. `bgBlue.png` embedded (433,960 bytes).
 - **Cookie text size**: scale reduced 2.0f → 1.5f so it fits on screen.
 - **Texture sub-rect UVs**: `drawTexture()` gained optional `srcX/srcY/srcW/srcH` params (0 = full texture). Cursor uses top-left 32x32 of `cursor.png` sprite sheet; store rows use one 64px strip of `storeTile.png` per row at natural 300px width centered in cell.
-- **Store panel**: no BUY button — full-row click buys; locked buildings show `"???"` with red price; permanent unlock via `cookiesEarned >= basePrice`; big faded owned amount inside cell repositioned per Image 1 to bottom-right corner (`right:12px`, below the price line) instead of top:6px; cell separator lines → grid-of-cells look.
+- **Store panel**: no BUY button — full-row click buys; locked buildings show `"???"` with red price; permanent unlock via `cookiesEarned >= basePrice`; building names scale 1.2f with text shadow, price scale 0.8f with `smallCookies` icon prefix; big faded owned amount inside cell repositioned per Image 1 to bottom-right corner (`right:12px`, vertically centred) instead of top:6px, scale 1.5f; cell separator lines → grid-of-cells look. Panel borders (`panelHorizontal`/`panelVertical`) tiled at natural size, never scaled, per Image 2 sectioned layout. Middle panel top tab strip: Options Stats Legacy Info Store. Font switched to Merriweather.
 - **Cookie wobble**: clamped between 90% and 120%; click pop target 1.2 + velocity 0.3.
 
 Text renders clean, cookie renders as a proper cookie, blue background shows, store cells look correct. No further rendering work needed for the current scoped item.
@@ -255,6 +264,15 @@ cmake -S cpp -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ./build/cookie_clicker
 ```
+
+## Commit & build workflow
+
+At the end of every task:
+1. Run the build (`cmake --build build -j`). If it fails to compile, stop and report it.
+2. Run the task's checks (`timeout 3 ./build/cookie_clicker` → expect exit 124).
+3. `git add` only the files you changed.
+4. Commit with a terse message saying **what changed and why**. One logical change per commit — never mix refactors, features, and asset changes.
+5. `git push`. Never force-push or rewrite history. Never commit a broken build.
 
 Requirements:
 - **SDL2** (required) – present on this box; `find_package(SDL2)` works.

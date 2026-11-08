@@ -525,12 +525,26 @@ void ensureFace(f32 ptSize) {
         return;
     }
     if (!g_face) {
-        std::string path = std::string(kFontDir) + "/Tahoma-Bold-Font.ttf";
-        if (FT_New_Face(g_ft, path.c_str(), 0, &g_face) != 0) {
+        // Try Merriweather fonts from cwd first (preferred per style.css),
+        // then fall back to embedded Tahoma.
+        std::vector<std::string> fontPaths = {
+            "fonts/Merriweather_24pt-Bold.ttf",
+            "fonts/Merriweather-VariableFont_opsz,wdth,wght.ttf",
+            "fonts/Merriweather_24pt-Regular.ttf",
+            std::string(kFontDir) + "/Tahoma-Bold-Font.ttf",
+        };
+        bool loaded = false;
+        for (const auto& path : fontPaths) {
+            if (FT_New_Face(g_ft, path.c_str(), 0, &g_face) == 0) {
+                loaded = true;
+                break;
+            }
+        }
+        if (!loaded) {
             g_face = nullptr;
             static bool logged_font = false;
             if (!logged_font) {
-                std::fprintf(stderr, "[Render] failed to load font: %s\n", path.c_str());
+                std::fprintf(stderr, "[Render] failed to load any font\n");
                 logged_font = true;
             }
             return;
@@ -626,6 +640,26 @@ f32 Render::measureText(const char* text, f32 scale) {
         w += g.advance * scale;
     }
     return w;
+}
+
+f32 Render::measureTextCenterY(const char* text, f32 scale) {
+    if (!text) return 0.0f;
+    ensureFace(16.0f * scale);
+    f32 maxTop = 0.0f;
+    f32 maxBottom = 0.0f;
+    bool first = true;
+    for (const char* p = text; *p; ++p) {
+        if (*p == ' ') continue;
+        Glyph& g = getGlyph(*p);
+        if (!g.id) continue;
+        // glyph top/bottom relative to drawText's y (which sits at the baseline area)
+        f32 top = -static_cast<f32>(g.bearingY) * scale;
+        f32 bottom = top + static_cast<f32>(g.h) * scale;
+        if (first) { maxTop = top; maxBottom = bottom; first = false; }
+        else { if (top < maxTop) maxTop = top; if (bottom > maxBottom) maxBottom = bottom; }
+    }
+    if (first) return 0.0f;
+    return (maxTop + maxBottom) / 2.0f; // visual centre offset from y
 }
 
 // ---------------------------------------------------------------------------

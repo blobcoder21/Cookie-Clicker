@@ -29,6 +29,9 @@ public:
     static void drawText(f32 x, f32 y, const char* text, u32 color,
                          f32 scale = 1.0f);
     static f32 measureText(const char* text, f32 scale = 1.0f);
+    // Returns the offset from drawText's y to the text's visual vertical centre
+    // (typically negative for digits, since the centre sits above y).
+    static f32 measureTextCenterY(const char* text, f32 scale = 1.0f);
 
     // Images (loaded from img/) ---------------------------------------------
     static i32 loadTexture(const std::string& path);   // returns opaque handle

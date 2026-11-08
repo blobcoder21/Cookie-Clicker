@@ -11,6 +11,27 @@
 - Reviewed cpp/ skeleton for constraint violations; logged them as tasks in HANDOFF.md
 - Updated HANDOFF.md next task to respect constraints (split core from platform via four interfaces)
 - Commit hash: 51ace206e48263932fc69c8381e452a97d4b0717
+
+### Commit & build workflow
+
+At the end of every task:
+1. Run the build (`cmake --build build -j`). If it fails to compile, stop and report it.
+2. Run the task's checks (`timeout 3 ./build/cookie_clicker` → expect exit 124).
+3. `git add` only the files you changed.
+4. Commit with a terse message saying **what changed and why**. One logical change per commit — never mix refactors, features, and asset changes.
+5. `git push`. Never force-push or rewrite history. Never commit a broken build.
+
+### Next architectural goal — Extract a UI layer
+
+**Goal:** Split rendering/layout out of `Game` so the core is portable to DSi/3DS without remaking UI.
+
+Rules:
+1. `Game` has **no `draw()` function** and includes **no `Render` or `UI` headers**. Core compiles with only logic headers on the include path.
+2. `UI` takes `const Game&` and `Render&`, owns **all** layout, drawing, and hit-testing.
+3. Input goes `UI::on_pointer(x, y)` → returns a game action → main loop applies it to `Game`.
+4. All layout numbers live in a `Layout` struct, **not** inline in draw code.
+5. Behaviour and visuals must be **pixel-identical** to now — this is a pure refactor, no visual change.
+6. Verify that the logic target compiles with only the logic headers on the include path.
 - Ported all 18 building types (Cursor … Idleverse) with JS-accurate auto-curve basePrice/baseCps, art, and per-building CPS functions (Cursor fingers, Grandma synergies, etc.)
 - Implemented full Game::calculateGains(): prestige/heavenly multiplier, cookie upgrades, kittens/cat multipliers, eggs (incl. Century egg), sugar baking, auras (Radiant Appetite, Dragon's Fortune), wrinkler sucking, Elder Covenant, Golden switch, Shimmering veil, Occult obstruction, Magic shenanigans, buffs (multCpS), globalCpsMult
 - Implemented Game::logic(): per-frame cookie earning (cookiesPs/fps), milk progress, research, seasons, wrinklers, totalCookies accumulation, cookie shower timing, periodic recalculateGains, achievement/unlock checks, autosave every 60s
@@ -41,7 +62,7 @@
   - Removed BUY buttons: clicking anywhere in a store row buys one building (`Render::registerButton` covers the full 300x64 cell; `main.cpp` hit-test already maps `hit - HIT_BUILDING_BASE` → building index → `game.buyBuilding()`).
   - Store tile backgrounds from `storeTile.png` (300x256 = 4 strips of 64px): each row uses one horizontal strip via `drawTexture` UVs, drawn at natural 300px width centered in the row cell. `storeTile.png` (74,308 bytes) embedded into `cpp/EmbeddedAssets.*`.
   - Locked buildings show `"???"` instead of name; icon hidden; price red (`0xFF6666FF`) when unaffordable/locked, green (`0x6FFF6FFF`) when affordable.
-  - Big faded owned amount (`.product .content .owned`): repositioned per Image 1 to the bottom-right corner of the cell (`right:12px`, ~6px above the cell bottom), below the price line so it reads as a separate faded corner label; scale 0.9f (~14px), color `0x00000066`.
+  - Store panel: tabs (Options Stats Legacy Info Store) along top wood strip; middle blank bands separated by tiled panelHorizontal borders; vertical panelVertical wood dividers between panels; borders placed never scaled, last tile clipped to exact edge, snapped to whole pixels.
   - Thin horizontal cell separator line (`0x4A4A60FF`) drawn at bottom of each row → grid-of-cells look.
   - Cookie wobble clamped between 90% and 120%: `bigCookieState==1` → target 0.9, `bigCookieState==2` → target 1.2; click pop sets target 1.2 + velocity 0.3 (was `+= 1.5` causing huge jumps).
   - Permanent building unlock: `cookiesEarned >= basePrice` sets `b->locked = false` (JS `Game.ObjectsById[i].unlock()` semantics, lifetime-cookies based, save-compatible).

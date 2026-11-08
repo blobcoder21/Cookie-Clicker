@@ -9,13 +9,25 @@ See Verification status below. A C++ save now round-trips byte-identical through
 - Left panel (#sectionLeft, 30% width): cookie count (#cookies, top 10%), bakery name, CPS, and the big cookie (#cookieAnchor, centered at top 40%) rendered from `img/perfectCookie.png`, clickable. Wobble clamped between 90% and 120% (click pops to 120% with spring bounce).
 - Right panel (#sectionRight / #store, rightmost ~318px): Store with `.product` tiles (300x64, `storeTile.png` strips at natural width centered in each cell), each with building icon (64x64, cursor uses top-left quadrant of sprite sheet), name, green price when affordable / red when not, `"???"` when locked.
 - No separate BUY button: clicking anywhere in a store row buys one building. Purchase feedback: bought building's cell flashes green ~0.4s; clicking the cookie pops it larger.
-- Big faded owned amount inside each cell at right:12px top:6px (small semi-transparent text).
+- Fonts: switched from Tahoma to **Merriweather** (`Merriweather_24pt-Bold.ttf` from cwd `fonts/`, with embedded Tahoma as fallback). All store text now uses Merriweather.
 - Hard requirement respected: `cpp/` core (`Game`, `Building`, `SaveLoad`, economy…) knows nothing of SDL/OpenGL/FreeType. All rendering goes through the `Render` platform layer (`cpp/Render.cpp`), which decodes PNGs with libpng and renders text with FreeType2. `Game::draw()` issues only `Render::*` calls. `main.cpp` (PC backend) owns SDL, hit-tests the cookie/buy buttons against areas registered during `draw()`, and calls `game.clickCookie()` / `game.buyBuilding()`.
 - `main.cpp` now calls `game.load()` (previously missed, so buildings were never created). `Game::loop()` is logic-only; `draw()` is invoked once per rendered frame from `main.cpp`.
 - Font fix: glyph cache is cleared when the FreeType face size changes (was cached by char only, so all text used the first scale's bitmaps — now cookie count, CPS, bakery name, and building names each render at their correct size).
 - Asset fix: 23 GUI assets embedded (18 building icons, big cookie, bgBlue, storeTile, TTF font) in `cpp/EmbeddedAssets.*` and extracted to a temp dir at `Render::init`, so the executable runs from any working directory with no missing textures or fonts.
 
 Next scoped item: continue per PORTING_PLAN.md milestones (upgrades panel, save/load file persistence, settings menu, polish). Resist mod support and elaborate rendering until this window is solid.
+
+### Next architectural goal — Extract a UI layer
+
+**Goal:** Split rendering/layout out of `Game` so the core is portable to DSi/3DS without remaking UI.
+
+Rules:
+1. `Game` has **no `draw()` function** and includes **no `Render` or `UI` headers**. Core compiles with only logic headers on the include path.
+2. `UI` takes `const Game&` and `Render&`, owns **all** layout, drawing, and hit-testing.
+3. Input goes `UI::on_pointer(x, y)` → returns a game action → main loop applies it to `Game`.
+4. All layout numbers live in a `Layout` struct, **not** inline in draw code.
+5. Behaviour and visuals must be **pixel-identical** to now — this is a pure refactor, no visual change.
+6. Verify that the logic target compiles with only the logic headers on the include path.
 
 ## Exact build/test commands
 ```
@@ -33,6 +45,15 @@ Syntax check (no SDL/png/ft needed for core):
 cd cpp
 g++ -std=c++17 -fsyntax-only -Wall -Wextra -I. *.cpp
 ```
+
+## Commit & build workflow
+
+At the end of every task:
+1. Run the build (`cmake --build build -j`). If it fails to compile, stop and report it.
+2. Run the task's checks (`timeout 3 ./build/cookie_clicker` → expect exit 124).
+3. `git add` only the files you changed.
+4. Commit with a terse message saying **what changed and why**. One logical change per commit — never mix refactors, features, and asset changes.
+5. `git push`. Never force-push or rewrite history. Never commit a broken build.
 
 ## Verification status
 
@@ -63,15 +84,18 @@ g++ -std=c++17 -fsyntax-only -Wall -Wextra -I. *.cpp
 
 **Store panel — VERIFIED this session:**
 - `bgBlue.png` path fixed (`"img/bgBlue.png"` → `"bgBlue.png"`); `bgBlue.png` embedded (433,960 bytes).
-- `cursor.png` sprite sheet: only top-left 32x32 quadrant (white index finger) drawn, stretched to 64x64 icon slot.
+- Cursor icon now shows only the white index finger: `cursor.png` is a 2x2 sprite sheet (64x64 total). `drawTexture()` gained optional `srcX/srcY/srcW/srcH` UV parameters; cursor draws top-left 32x32 quadrant stretched to 64x64.
 - BUY buttons removed: full-row click buys one building; hit-test → `game.buyBuilding()` works via existing `main.cpp` handler.
 - `storeTile.png` (74,308 bytes) embedded; each row uses one 64px strip via UV coords at natural 300px width centered in cell.
-- Locked buildings show `"???"`, icon hidden, red price; affordable green price.
-- Big faded owned amount inside cell repositioned per Image 1 to bottom-right corner (`right:12px`, below the price line) instead of top:6px, scale 0.9f (~14px), color `0x00000066`.
-- Cell separator line (`0x4A4A60FF`) at bottom of each row → grid-of-cells look.
+- Building names (.product .content): scale 1.2f (~19px) with dark text shadow below — prominent white name when unlocked, grey `"???"` when locked. Price (.price): scale 0.8f (~13px), green when affordable / red when locked/unaffordable, with small `smallCookies.png` cookie icon drawn just before the price.
+- Big faded owned amount (`.product .content .owned`): repositioned per Image 1 to bottom-right corner (`right:12px`, vertically centred in the cell) instead of top:6px, scale 1.5f (~24px), color `0x00000066`.
+- Thin horizontal cell separator line (`0x4A4A60FF`) at bottom of each row → grid-of-cells look.
 - Cookie wobble clamped 90%–120%; click pop target 1.2 + velocity 0.3 (was `+= 1.5`).
 - Permanent unlock: `cookiesEarned >= basePrice` sets `b->locked = false` (save-compatible).
-- Build + run verified: all 8 textures load, no magenta fallback, exit 124 expected from timeout.
+- Render additions: `Render::drawTextureTiled()` tiles a texture along one axis at natural size (never scaled), clips the last tile to the exact edge length, snaps to whole pixels; `Render::textureSize()` queries source-pixel dims. `resolveAssetPath()` now also falls back to cwd `img/<path>` so non-embedded dev assets (e.g. `panelHorizontal.png`, `panelVertical.png`) load when run from repo root.
+- Layout restructured per Image 2: `Game::draw()` now renders a middle sectioned panel (tabs Options Stats Legacy Info Store along the top wood strip; blank bands separated by tiled `panelHorizontal` borders; vertical `panelVertical` wood dividers between left cookie panel / middle panel / right store panel) — all panel borders placed, never scaled, last tile clipped to exact edge, positions snapped to whole pixels. Right store panel keeps `"STORE"` title, store cells (storeTile strip, icon, name, price with cookie icon, faded owned amount bottom-right scale 1.5f vertically centred), full-row click to buy, cell separator lines, flashing purchase feedback.
+- Build + run verified: `cmake --build build -j` (exit 0), `timeout 3 ./build/cookie_clicker` (exit 124, expected). All textures load incl. panelHorizontal (512x16) and panelVertical (16x512), no magenta fallback.
+- Fonts: switched from Tahoma to **Merriweather** (`Merriweather_24pt-Bold.ttf` from cwd `fonts/`, embedded Tahoma as fallback). Font sizes: cookie count 1.5f (~24px), bakery name 1.25f (~20px), CPS 0.8f (~13px), store title 1.75f (~28px), building name 1.2f (~19px), price 0.8f (~13px), owned amount 1.5f (~24px).
 
 ## Known broken, stubbed, or unverified code (honest list)
 

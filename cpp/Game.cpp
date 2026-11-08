@@ -458,11 +458,12 @@ void Game::draw() {
                      cookieStr.c_str(), 0xFFFFFFFF, 1.5f);
 
     // bakery name (#bakeryName, top 10%)
+    // CSS: font-size 20px
     std::string bakery = getBakeryName();
-    f32 bw = Render::measureText(bakery.c_str(), 1.0f);
+    f32 bw = Render::measureText(bakery.c_str(), 1.25f);
     Render::drawText(static_cast<f32>(leftW / 2) - bw / 2,
                      static_cast<f32>(h * 0.10f) + 30.0f,
-                     bakery.c_str(), 0xCCCCCCFF, 1.0f);
+                     bakery.c_str(), 0xCCCCCCFF, 1.25f);
 
     // CPS (#cookies-style line below bakery name)
     std::string cpsStr = formatCookies(cookiesPs) + " /s";
@@ -486,22 +487,98 @@ void Game::draw() {
                            static_cast<f32>(cr));
 
     // ------------------------------------------------------------------
-    // Right panel: #sectionRight / #store  (rightmost ~318px)
+    // Middle panel: sectioned panel with wood borders (never scaled).
+    // Vertical wood dividers separate it from the left (cookie) panel and
+    // right (store) panel. Top tab strip: Options Stats Legacy Info Store.
+    // Textures are placed at natural size, never scaled; the last tile is
+    // clipped to the exact edge length so there is no overhang/seam.
     // ------------------------------------------------------------------
     i32 storeW = 318;
-    i32 sx = w - storeW;
-    if (sx < leftW) sx = leftW; // guard for narrow windows
 
-    // store panel background (matches #sectionRight: rgba(0,0,0,0.5))
-    Render::drawRect(static_cast<f32>(sx), 0.0f,
-                     static_cast<f32>(storeW), static_cast<f32>(h),
+    // wood borders, tiled at natural size (never scaled)
+    static i32 panelHorizTex = Render::loadTexture("panelHorizontal.png");
+    static i32 panelVertTex = Render::loadTexture("panelVertical.png");
+    i32 phW = 0, phH = 0;
+    i32 pvW2 = 0, pvH = 0;
+    Render::textureSize(panelHorizTex, &phW, &phH);
+    Render::textureSize(panelVertTex, &pvW2, &pvH);
+
+    i32 sx = w - storeW;
+    if (sx < leftW + 2 * pvW2) sx = leftW + 2 * pvW2; // guard for narrow windows
+    i32 middleX = leftW + pvW2;   // after left vertical wood divider
+    i32 middleW = sx - pvW2 - middleX; // before right vertical wood divider
+    if (middleW < 1) middleW = 1;
+
+    // vertical wood divider between left (cookie) panel and middle panel
+    if (pvW2 > 0 && pvH > 0) {
+        Render::drawTextureTiled(panelVertTex,
+                                 static_cast<f32>(leftW), 0.0f,
+                                 static_cast<f32>(pvW2), static_cast<f32>(h),
+                                 0xFFFFFFFF, 1); // axis 1 = vertical
+    }
+
+    // middle panel background fill
+    Render::drawRect(static_cast<f32>(middleX), 0.0f,
+                     static_cast<f32>(middleW), static_cast<f32>(h),
+                     0x2A2A3AFF);
+
+    // top tab strip (wood horizontal bar across middle panel top)
+    if (phW > 0 && phH > 0) {
+        Render::drawTextureTiled(panelHorizTex,
+                                 static_cast<f32>(middleX), 90.0f,
+                                 static_cast<f32>(middleW), static_cast<f32>(phH),
+                                 0xFFFFFFFF, 0);
+    }
+    // tab labels
+    Render::drawText(static_cast<f32>(middleX + 16), 96.0f, "Options", 0xFFFFFFFF, 0.9f);
+    Render::drawText(static_cast<f32>(middleX + 110), 96.0f, "Stats", 0xFFFFFFFF, 0.9f);
+    Render::drawText(static_cast<f32>(middleX + 204), 96.0f, "Legacy", 0xFFFFFFFF, 0.9f);
+    Render::drawText(static_cast<f32>(middleX + 298), 96.0f, "Info", 0xFFFFFFFF, 0.9f);
+    Render::drawText(static_cast<f32>(middleX + 372), 96.0f, "Store", 0xFFFFFFFF, 0.9f);
+
+    // blank horizontal bands separated by tiled panelHorizontal borders
+    const i32 numSections = 4;
+    f32 bandY = 90.0f + static_cast<f32>(phH); // below tab strip
+    f32 bordersH = static_cast<f32>(phH * (numSections - 1));
+    f32 bandH = (static_cast<f32>(h) - bandY - bordersH) / static_cast<f32>(numSections);
+    if (bandH < 40.0f) bandH = 40.0f;
+    for (i32 i = 0; i < numSections; ++i) {
+        // blank band
+        Render::drawRect(static_cast<f32>(middleX), bandY,
+                         static_cast<f32>(middleW), bandH, 0x3A3A4AFF);
+        bandY += bandH;
+        // wood border between bands (clip last tile to exact width)
+        if (i < numSections - 1 && phW > 0 && phH > 0) {
+            Render::drawTextureTiled(panelHorizTex,
+                                     static_cast<f32>(middleX), bandY,
+                                     static_cast<f32>(middleW), static_cast<f32>(phH),
+                                     0xFFFFFFFF, 0); // axis 0 = horizontal
+            bandY += static_cast<f32>(phH);
+        }
+    }
+
+    // vertical wood divider between middle panel and right (store) panel
+    if (pvW2 > 0 && pvH > 0) {
+        Render::drawTextureTiled(panelVertTex,
+                                 static_cast<f32>(sx - pvW2), 0.0f,
+                                 static_cast<f32>(pvW2), static_cast<f32>(h),
+                                 0xFFFFFFFF, 1); // axis 1 = vertical
+    }
+
+    // ------------------------------------------------------------------
+    // Right panel: #sectionRight / #store (rightmost ~318px)
+    // ------------------------------------------------------------------
+    // store panel background inside the wood border (divider drawn above)
+    i32 storeX = sx;
+    i32 storeInnerW = storeW;
+    Render::drawRect(static_cast<f32>(storeX), 0.0f,
+                     static_cast<f32>(storeInnerW), static_cast<f32>(h),
                      0x00000080);
-    Render::drawRect(static_cast<f32>(sx), 0.0f, 1.0f, static_cast<f32>(h),
-                     0x4A4A60FF);
 
     // store title (#storeTitle)
-    Render::drawText(static_cast<f32>(sx + 16), 48.0f, "STORE",
-                     0xFFFFFFFF, 1.5f);
+    // CSS: .title font-size 28px
+    Render::drawText(static_cast<f32>(storeX + 16), 48.0f, "STORE",
+                     0xFFFFFFFF, 1.75f);
 
     i32 rowY = 112; // below the store title
     i32 row = 0;
@@ -526,7 +603,7 @@ void Game::draw() {
         u32 tileColor = (flashing || isEnabled) ? 0xFFFFFFFF : 0x555555FF;
         f32 stripY = static_cast<f32>((row % 4) * 64);
         // Draw the 300px-wide tile strip at its natural width (centered in the row).
-        f32 cellX = static_cast<f32>(sx) + (static_cast<f32>(storeW) - 300.0f) / 2.0f;
+        f32 cellX = static_cast<f32>(storeX) + (static_cast<f32>(storeInnerW) - 300.0f) / 2.0f;
         Render::drawTexture(storeTileTex,
                             cellX, static_cast<f32>(rowY),
                             300.0f, 64.0f, tileColor,
@@ -555,27 +632,46 @@ void Game::draw() {
                 srcX = 0.0f; srcY = 0.0f; srcW = 32.0f; srcH = 32.0f;
             }
             Render::drawTexture(iconHandle,
-                                static_cast<f32>(sx), static_cast<f32>(rowY),
+                                static_cast<f32>(storeX), static_cast<f32>(rowY),
                                 64.0f, 64.0f, 0xFFFFFFFF,
                                 srcX, srcY, srcW, srcH);
         }
 
         // building name (.product .content, left 64px) — "???" when locked
-        // CSS: .product.locked .title {display:none;} .product.locked .lockedTitle {display:block;}
+        // CSS: .title font-size 28px / building names prominent white with shadow
         std::string displayName = isLocked ? "???" : b->name;
         u32 nameColor = isEnabled ? 0xFFFFFFFF : 0x888888FF;
-        Render::drawText(static_cast<f32>(sx + 72),
-                         static_cast<f32>(rowY + 8), displayName.c_str(),
-                         nameColor, 0.9f);
+        // text shadow (dark offset behind main text)
+        Render::drawText(static_cast<f32>(storeX + 73), static_cast<f32>(rowY + 9), displayName.c_str(),
+                         0x000000AA, 1.2f);
+        Render::drawText(static_cast<f32>(storeX + 72), static_cast<f32>(rowY + 8), displayName.c_str(),
+                         nameColor, 1.2f);
 
         // price (.price: green #6f6 when affordable, red #f66 when locked/unaffordable)
-        // CSS: .price {color:#6f6;} .price.disabled {color:#f66;}
+        // CSS: inherits body font-size 13px — show small cookie icon before price
         std::string priceStr = formatCookies(b->getPrice());
-        f32 pw = Render::measureText(priceStr.c_str(), 0.9f);
+        f32 pw = Render::measureText(priceStr.c_str(), 0.8f);
         u32 priceColor = isEnabled ? 0x6FFF6FFF : 0xFF6666FF;
-        Render::drawText(static_cast<f32>(sx + storeW - 76) - pw,
+        // small cookie icon before price (16x16 at natural size, clipped to cell)
+        static i32 priceCookieTex = Render::loadTexture("smallCookies.png");
+        f32 priceIconW = 0.0f, priceIconH = 0.0f;
+        i32 priceIconWi = 0, priceIconHi = 0;
+        Render::textureSize(priceCookieTex, &priceIconWi, &priceIconHi);
+        if (priceIconWi > 0 && priceIconHi > 0) {
+            priceIconW = static_cast<f32>(priceIconWi);
+            priceIconH = static_cast<f32>(priceIconHi);
+            f32 iconScale = 16.0f / static_cast<f32>(priceIconW);
+            f32 iconDrawW = static_cast<f32>(priceIconW) * iconScale;
+            f32 iconDrawH = static_cast<f32>(priceIconH) * iconScale;
+            f32 iconY = static_cast<f32>(rowY + 8) + (14.0f - iconDrawH) / 2.0f;
+            Render::drawTexture(priceCookieTex,
+                                static_cast<f32>(storeX + storeInnerW - 76) - pw - iconDrawW - 6.0f,
+                                iconY,
+                                iconDrawW, iconDrawH, priceColor);
+        }
+        Render::drawText(static_cast<f32>(storeX + storeInnerW - 76) - pw,
                          static_cast<f32>(rowY + 8), priceStr.c_str(),
-                         priceColor, 0.9f);
+                         priceColor, 0.8f);
 
         // big faded amount-owned (.product .content .owned)
         // Repositioned per Image 1: bottom-right corner of the cell (right:12px),
@@ -588,20 +684,24 @@ void Game::draw() {
             f32 ow = Render::measureText(ownedStr.c_str(), scale);
             // right edge of the 300px cell, minus 12px margin, minus text width
             f32 ownedX = cellX + 300.0f - 12.0f - ow;
-            // vertically centre the digit inside the 64px-tall cell
+            // vertically centre the digit inside the 64px-tall cell:
+            // drawText's y sits above the text top; measureTextCenterY returns
+            // the offset from y to the text's visual centre, so subtracting it
+            // places the digit's centre exactly at the cell centre (rowY + 32).
+            f32 cy = Render::measureTextCenterY(ownedStr.c_str(), scale);
             Render::drawText(ownedX,
-                             static_cast<f32>(rowY + 32 + static_cast<int>(8 * scale)), ownedStr.c_str(),
+                             static_cast<f32>(rowY + 32 - cy), ownedStr.c_str(),
                              0x00000066, scale);
         }
 
         // Click anywhere in the row to buy (no separate BUY button).
-        Render::registerButton(1000 + row, static_cast<f32>(sx),
+        Render::registerButton(1000 + row, static_cast<f32>(storeX),
                                static_cast<f32>(rowY),
-                               static_cast<f32>(storeW), 64.0f);
+                               static_cast<f32>(storeInnerW), 64.0f);
 
         // Cell separator line between rows (grid of cells effect).
-        Render::drawRect(static_cast<f32>(sx), static_cast<f32>(rowY + 64),
-                         static_cast<f32>(storeW), 1.0f, 0x4A4A60FF);
+        Render::drawRect(static_cast<f32>(storeX), static_cast<f32>(rowY + 64),
+                         static_cast<f32>(storeInnerW), 1.0f, 0x4A4A60FF);
 
         rowY += 72; // 64px tile + 8px gap
         ++row;
