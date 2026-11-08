@@ -280,14 +280,13 @@ void UI::draw() {
         }
     };
 
-    if (sx > leftW) {
-        drawWoodStrip(static_cast<f32>(leftW), static_cast<f32>(layout_.topBarY),
-                      static_cast<f32>(sx - leftW), static_cast<f32>(layout_.topBarH));
-    }
-
     auto buttonRightEdge = [&](i32 relX, i32 relW) {
         return static_cast<f32>(sx + storeW - relX - relW);
     };
+
+    // Per-button wood strips only (no continuous background strip).
+    // Each button gets its own wood plank background; the news ticker area
+    // between them stays dark.
 
     // Options button
     {
