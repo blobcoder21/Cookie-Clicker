@@ -58,6 +58,7 @@ set(SOURCES
     Assets.cpp
     Audio.cpp
     Render.cpp
+    UI.cpp
     EmbeddedAssets.cpp
 )
 
@@ -81,6 +82,7 @@ set(HEADERS
     Assets.h
     Audio.h
     Render.h
+    UI.h
     EmbeddedAssets.h
 )
 
@@ -125,6 +127,70 @@ if(APPLE)
         target_link_libraries(cookie_clicker PRIVATE ${IOKIT})
     endif()
 endif()
+
+# ---------------------------------------------------------------------------
+# Logic-only target
+#
+# Compiles the game core (Game, economy, save/load, buildings, ...) with only
+# logic headers on the include path — no Render, no UI, no SDL/OpenGL/
+# libpng/FreeType. Enforces the portability rule that Game must not depend on
+# platform or UI headers.
+# Link step is deliberately omitted: this is a compile-check target that
+# verifies the core is portable to DSi/3DS without remaking UI.
+# ---------------------------------------------------------------------------
+set(LOGIC_SOURCES
+    Types.cpp
+    Game.cpp
+    Economy.cpp
+    Building.cpp
+    Upgrade.cpp
+    Achievement.cpp
+    Buff.cpp
+    Shimmer.cpp
+    Particle.cpp
+    Minigame.cpp
+    Garden.cpp
+    Grimoire.cpp
+    Pantheon.cpp
+    Dungeons.cpp
+    DungeonGen.cpp
+    SaveLoad.cpp
+)
+
+set(LOGIC_HEADERS
+    Types.h
+    Game.h
+    Economy.h
+    Building.h
+    Upgrade.h
+    Achievement.h
+    Buff.h
+    Shimmer.h
+    Particle.h
+    Minigame.h
+    Garden.h
+    Grimoire.h
+    Pantheon.h
+    Dungeons.h
+    DungeonGen.h
+    SaveLoad.h
+)
+
+add_library(cookie_clicker_logic INTERFACE ${LOGIC_HEADERS})
+target_sources(cookie_clicker_logic INTERFACE ${LOGIC_SOURCES})
+target_include_directories(cookie_clicker_logic INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+
+# Logic-only target: enforces that the game core compiles with only logic
+# headers on the include path — no Render, no UI, no SDL/OpenGL/libpng/
+# FreeType. Mirrors HANDOFF.md's syntax check but restricted to logic sources.
+# Compile-only (-fsyntax-only): no main() exists in the core, so we never link.
+add_custom_target(cookie_clicker_logic_check
+    COMMAND ${CMAKE_CXX_COMPILER} -std=c++17 -fsyntax-only -Wall -Wextra
+            -I${CMAKE_CURRENT_SOURCE_DIR} ${LOGIC_SOURCES}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    COMMENT "Checking logic sources compile with only logic headers (no Render/UI/platform headers)"
+    VERBATIM
+)
 
 # ---------------------------------------------------------------------------
 # Build notes
