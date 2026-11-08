@@ -288,6 +288,17 @@ GLuint uploadTexture(const PngImage& img) {
 } // namespace
 
 // ---------------------------------------------------------------------------
+// Render lifecycle
+// ---------------------------------------------------------------------------
+Render::Render() {
+    g_window = nullptr;
+    g_w = 900;
+    g_h = 600;
+}
+
+Render::~Render() = default;
+
+// ---------------------------------------------------------------------------
 // Drawing (outside the anonymous namespace so Render member functions link)
 // ---------------------------------------------------------------------------
 void Render::drawRect(f32 x, f32 y, f32 w, f32 h, u32 color) {

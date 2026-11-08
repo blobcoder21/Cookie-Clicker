@@ -15,29 +15,30 @@
 // ---------------------------------------------------------------------------
 class Render {
 public:
-    Render() = delete;
+    Render();
+    ~Render();
 
     // Lifecycle -------------------------------------------------------------
-    static void init(void* window);        // window is an SDL_Window*
-    static void shutdown();
-    static void newFrame();                // clear + reset orthographic projection
-    static void render();                  // present / swap buffers
+    void init(void* window);        // window is an SDL_Window*
+    void shutdown();
+    void newFrame();                // clear + reset orthographic projection
+    void render();                  // present / swap buffers
 
     // 2D drawing (screen pixels, origin top-left, y down) -----------------
     // color is 0xRRGGBBAA
-    static void drawRect(f32 x, f32 y, f32 w, f32 h, u32 color);
-    static void drawText(f32 x, f32 y, const char* text, u32 color,
+    void drawRect(f32 x, f32 y, f32 w, f32 h, u32 color);
+    void drawText(f32 x, f32 y, const char* text, u32 color,
                          f32 scale = 1.0f);
-    static f32 measureText(const char* text, f32 scale = 1.0f);
+    f32 measureText(const char* text, f32 scale = 1.0f);
     // Returns the offset from drawText's y to the text's visual vertical centre
     // (typically negative for digits, since the centre sits above y).
-    static f32 measureTextCenterY(const char* text, f32 scale = 1.0f);
+    f32 measureTextCenterY(const char* text, f32 scale = 1.0f);
 
     // Images (loaded from img/) ---------------------------------------------
-    static i32 loadTexture(const std::string& path);   // returns opaque handle
+    i32 loadTexture(const std::string& path);   // returns opaque handle
     // Draw texture (optionally a sub-rectangle srcX/srcY/srcW/srcH in texture
     // pixels; pass 0 for srcW/srcH to use the full texture).
-    static void drawTexture(i32 handle, f32 x, f32 y, f32 w, f32 h,
+    void drawTexture(i32 handle, f32 x, f32 y, f32 w, f32 h,
                             u32 color = 0xFFFFFFFF,
                             f32 srcX = 0.0f, f32 srcY = 0.0f,
                             f32 srcW = 0.0f, f32 srcH = 0.0f);
@@ -49,20 +50,20 @@ public:
     // are snapped to whole pixels so you don't get shimmering seams. Draw the
     // strips first, then any joint/end caps on top afterwards so they cover the
     // tile boundaries.
-    static void drawTextureTiled(i32 handle, f32 x, f32 y, f32 w, f32 h,
+    void drawTextureTiled(i32 handle, f32 x, f32 y, f32 w, f32 h,
                                  u32 color = 0xFFFFFFFF, i32 axis = 0);
 
     // Returns texture dimensions in source pixels (false if not loaded).
-    static bool textureSize(i32 handle, i32* w, i32* h);
+    bool textureSize(i32 handle, i32* w, i32* h);
 
     // Clickable areas (registered during draw; cleared each newFrame) -------
-    static void registerCookie(f32 x, f32 y, f32 r);
-    static void registerButton(i32 id, f32 x, f32 y, f32 w, f32 h);
-    static i32 hitTest(i32 mx, i32 my);  // HIT_COOKIE / building id / HIT_NONE
+    void registerCookie(f32 x, f32 y, f32 r);
+    void registerButton(i32 id, f32 x, f32 y, f32 w, f32 h);
+    i32 hitTest(i32 mx, i32 my);  // HIT_COOKIE / building id / HIT_NONE
 
     // Window size -----------------------------------------------------------
-    static i32 windowW();
-    static i32 windowH();
+    i32 windowW();
+    i32 windowH();
 
     static constexpr i32 HIT_COOKIE = -1;
     static constexpr i32 HIT_BUILDING_BASE = 1000;
