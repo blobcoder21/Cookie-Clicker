@@ -46,4 +46,6 @@ namespace EmbeddedAssets {
   extern unsigned int img_storeTile_png_len;
   extern unsigned char fonts_Tahoma_Bold_Font_ttf[];
   extern unsigned int fonts_Tahoma_Bold_Font_ttf_len;
+  extern unsigned char fonts_Kavoon_Regular_ttf[];
+  extern unsigned int fonts_Kavoon_Regular_ttf_len;
 } // namespace EmbeddedAssets

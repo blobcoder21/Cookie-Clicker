@@ -4,6 +4,18 @@
 #include <string>
 
 // ---------------------------------------------------------------------------
+// Internal font reference.
+//
+// Fonts are referred to by an internal ID rather than by filename, so that
+// reserved font names (per SIL OFL) never leak out of the render backend.
+// The PC backend maps each internal ID to an on-disk path inside Render.cpp.
+// ---------------------------------------------------------------------------
+enum class InternalFont : i32 {
+    Default = 0,   // primary game font (Kavoon-Regular on PC)
+    Fallback = 1,  // embedded fallback (Tahoma)
+};
+
+// ---------------------------------------------------------------------------
 // Platform rendering abstraction.
 //
 // The game core (Game, Building, SaveLoad, ...) must NOT know about SDL,

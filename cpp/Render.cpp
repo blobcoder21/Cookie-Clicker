@@ -48,6 +48,34 @@ i32 g_nextTexHandle = 1;
 std::string kImgDir = "img";
 std::string kFontDir = "fonts";
 
+// ---------------------------------------------------------------------------
+// Internal font path mapping (PC backend only).
+//
+// Fonts are resolved by internal ID so reserved font names (per SIL OFL,
+// e.g. Merriweather) never leak out of the render backend as filename
+// strings. The default game font is Kavoon-Regular from cwd fonts/;
+// the embedded Tahoma is the internal fallback.
+// ---------------------------------------------------------------------------
+std::string internalFontPath(InternalFont id) {
+    switch (id) {
+    case InternalFont::Default:
+        return "fonts/Kavoon-Regular.ttf";
+    case InternalFont::Fallback:
+        return std::string(kFontDir) + "/Tahoma-Bold-Font.ttf";
+    }
+    return std::string(kFontDir) + "/Tahoma-Bold-Font.ttf";
+}
+
+std::string internalFontFontName(InternalFont id) {
+    switch (id) {
+    case InternalFont::Default:
+        return "Kavoon-Regular.ttf";
+    case InternalFont::Fallback:
+        return "Tahoma-Bold-Font.ttf";
+    }
+    return "Tahoma-Bold-Font.ttf";
+}
+
 // Temp dir holding extracted embedded assets (cleaned up on shutdown)
 std::string g_tempAssetDir;
 
@@ -96,6 +124,7 @@ static const EmbeddedFile g_embeddedFiles[] = {
     {"img/bgBlue.png", EmbeddedAssets::img_bgBlue_png, EmbeddedAssets::img_bgBlue_png_len},
     {"img/storeTile.png", EmbeddedAssets::img_storeTile_png, EmbeddedAssets::img_storeTile_png_len},
     {"fonts/Tahoma-Bold-Font.ttf", EmbeddedAssets::fonts_Tahoma_Bold_Font_ttf, EmbeddedAssets::fonts_Tahoma_Bold_Font_ttf_len},
+    {"fonts/Kavoon-Regular.ttf", EmbeddedAssets::fonts_Kavoon_Regular_ttf, EmbeddedAssets::fonts_Kavoon_Regular_ttf_len},
 };
 
 bool writeFile(const std::string& path, const unsigned char* data, size_t len) {
@@ -536,13 +565,16 @@ void ensureFace(f32 ptSize) {
         return;
     }
     if (!g_face) {
-        // Try embedded Tahoma first (the project's standard font), then
-        // fall back to Merriweather from cwd if present.
+        // Resolve fonts by internal ID so reserved font names (per SIL OFL,
+        // e.g. Merriweather) never leak out of the render backend as filename
+        // strings. Default = Kavoon-Regular; fallback = embedded Tahoma.
+        // kFontDir points to the extracted temp dir at init (self-contained),
+        // falling back to cwd fonts/ for dev runs.
         std::vector<std::string> fontPaths = {
-            std::string(kFontDir) + "/Tahoma-Bold-Font.ttf",
-            "fonts/Merriweather_24pt-Bold.ttf",
-            "fonts/Merriweather-VariableFont_opsz,wdth,wght.ttf",
-            "fonts/Merriweather_24pt-Regular.ttf",
+            std::string(kFontDir) + "/" + internalFontFontName(InternalFont::Default),
+            std::string(kFontDir) + "/" + internalFontFontName(InternalFont::Fallback),
+            internalFontFontName(InternalFont::Default),
+            internalFontFontName(InternalFont::Fallback),
         };
         bool loaded = false;
         for (const auto& path : fontPaths) {
