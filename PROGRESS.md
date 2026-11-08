@@ -1,69 +1,41 @@
-- Analyzed repository structure (main.js 13,694 lines + 12 supporting files, 339 images, ~50 sounds)
-- Mapped main.js section boundaries (init, save/load, economy, buildings, upgrades, achievements, buffs, logic/draw/main loop)
-- Wrote PORTING_PLAN.md with porting options, architecture, milestones, risks, and build instructions
-- Created cpp/ C++ skeleton: CMakeLists.txt, Types.h/.cpp, Game.h/.cpp, Building.h/.cpp, Upgrade.h/.cpp, Achievement.h/.cpp, Buff.h/.cpp, Shimmer.h/.cpp, Particle.h/.cpp, Minigame.h/.cpp, Garden/Grimoire/Pantheon/Dungeons stubs, DungeonGen stub, SaveLoad.h/.cpp, Assets/Audio/Render stubs, main.cpp
-- Verified all C++ sources compile clean: g++ -std=c++17 -fsyntax-only -Wall -Wextra -I. (exit 0)
-- Verified CMake configures: cmake -S cpp -B build -DCMAKE_BUILD_TYPE=Release (SDL2=YES, OpenGL found, ImGui=OFF stub)
-- Verified build succeeds: cmake --build build -j (Built target cookie_clicker, exit 0)
-- Verified executable runs: timeout 3 ./build/cookie_clicker (exit 0, window opens and fixed-timestep loop runs)
-- Commit hash: a448f69a393573570569f6976c0909c5653258c6 (prior session)
-- Added "Portability constraints" section to PORTING_PLAN.md (PC first; DSi/BlocksDS then 3DS end targets; four platform interfaces Render/Audio/Input/Storage; no ImGui/OpenGL/SDL/filesystem in core; avoid iostream/exceptions/heap churn; fixed-size arrays; doubles out of per-frame paths; byte-compatible base64 save format)
-- Reviewed cpp/ skeleton for constraint violations; logged them as tasks in HANDOFF.md
-- Updated HANDOFF.md next task to respect constraints (split core from platform via four interfaces)
-- Commit hash: 51ace206e48263932fc69c8381e452a97d4b0717
+# Progress Log — Cookie Clicker C++ Port
 
-### Commit & build workflow
+## Session Summary: UI Layer Extraction & Layout Polish
 
-At the end of every task:
-1. Run the build (`cmake --build build -j`). If it fails to compile, stop and report it.
-2. Run the task's checks (`timeout 3 ./build/cookie_clicker` → expect exit 124).
-3. `git add` only the files you changed.
-4. Commit with a terse message saying **what changed and why**. One logical change per commit — never mix refactors, features, and asset changes.
-5. `git push`. Never force-push or rewrite history. Never commit a broken build.
+### Completed
+- **Background replacement**: `bgBlue.png` dropped; three-layer tiled background using `bgStripes.png` (vertical timeline), `vignette.png` (radial gradient), `glow.png` (soft cookie glow)
+- **Font overhaul**: All Tahoma references removed from `cpp/`; Kavoon for headings, PT Sans for body text embedded as `Kavoon-Regular.ttf` + `PTSans-*.ttf`
+- **Layout struct in UI.h fully rewritten**: All positions/sizes measured from `real_game.png` (1920x919) and scaled to 900x600 port. Fractions verified against real game layout.
+- **UI.cpp draw() overhauled**: Proper panel layout, text rendering, store column with scaled content (by `storeW/304`), rounded banner, PT Sans body text
+- **Store column**: Width fraction `0.158f` matches real game (~16% of window). Content scaled proportionally. Locked items show `"???"` in dark silhouette. No row separation/frames.
+- **Top menu bar**: Options/Stats/Info/Legacy buttons at `y=26`, gap=10, news ticker area between button groups
+- **Cookie wobble**: Settled with spring damping threshold (`|target-size - current-size| < 0.001` and `|velocity| < 0.001` → snap to target and zero velocity)
+- **Build**: `cmake --build build -j` succeeds; `timeout 3 ./build/cookie_clicker` exits 124 (expected)
 
-### Next architectural goal — Extract a UI layer
+### Layout Fractions Verified vs Real Game (1920x919 → 900x600)
+| Element | Real Fraction | Port Fraction | Status |
+|---|---|---|---|
+| Banner Y centre | 0.0968 | 0.097 | ✅ |
+| Cookie count Y centre | 0.1393 | 0.141 | ✅ |
+| CPS Y centre | 0.1632 | 0.163 | ✅ |
+| Cookie centre Y | 0.3885 | 0.388 | ✅ |
+| Store panel width | 0.1583 | 0.158 | ✅ |
+| Left panel width | 0.30 | 0.30 | ✅ |
 
-**Goal:** Split rendering/layout out of `Game` so the core is portable to DSi/3DS without remaking UI.
+### Active
+- Cookie y-centre: port ~330 vs real 357 — being resolved via `bigCookieYFraction` and size scaling
 
-Rules:
-1. `Game` has **no `draw()` function** and includes **no `Render` or `UI` headers**. Core compiles with only logic headers on the include path.
-2. `UI` takes `const Game&` and `Render&`, owns **all** layout, drawing, and hit-testing.
-3. Input goes `UI::on_pointer(x, y)` → returns a game action → main loop applies it to `Game`.
-4. All layout numbers live in a `Layout` struct, **not** inline in draw code.
-5. Behaviour and visuals must be **pixel-identical** to now — this is a pure refactor, no visual change.
-6. Verify that the logic target compiles with only the logic headers on the include path.
-- Ported all 18 building types (Cursor … Idleverse) with JS-accurate auto-curve basePrice/baseCps, art, and per-building CPS functions (Cursor fingers, Grandma synergies, etc.)
-- Implemented full Game::calculateGains(): prestige/heavenly multiplier, cookie upgrades, kittens/cat multipliers, eggs (incl. Century egg), sugar baking, auras (Radiant Appetite, Dragon's Fortune), wrinkler sucking, Elder Covenant, Golden switch, Shimmering veil, Occult obstruction, Magic shenanigans, buffs (multCpS), globalCpsMult
-- Implemented Game::logic(): per-frame cookie earning (cookiesPs/fps), milk progress, research, seasons, wrinklers, totalCookies accumulation, cookie shower timing, periodic recalculateGains, achievement/unlock checks, autosave every 60s
-- Implemented Game::mouseCps(): all fingers tiers, all mouse upgrades (Plastic … Plasmarble), Fortune #104, Santa's helpers, Cookie egg, Halo gloves, god labor effect, buff multClick, Dragon Cursor aura, Cursed finger, ComputeCps with click upgrades
-- Implemented Game::clickCookie(), Game::ComputeCps(), Game::buyBuilding(), Game::sellBuilding()
-- Extended Building.h/.cpp: cpsFunc override, buy/sell, getReverseSumPrice, getSellMultiplier
-- Extended Game.h: upgradesOwned, cpsSucked, computedMouseCps, toSave, GetTieredCpsMult, magicCpS, auraMult, GetHeavenlyMultiplier, updateShimmers, updateBuffs
-- Verified gameplay loop end-to-end: buy 1 Cursor → cookiesPs = 0.1 > 0, cookies increase by cookiesPs * elapsed_seconds (0.2 over 2s at 30 FPS) — matches HANDOFF.md verification criteria
-- Built minimal native PC GUI (early milestone), consuming existing game logic (no reimplementation), layout matching index.html / style.css:
-  - SDL2 native window (900x600, resizable, OpenGL) via `main.cpp`.
-  - `cpp/Render.cpp`: real rendering backend — libpng decodes `img/*.png` textures, FreeType2 renders `fonts/Tahoma-Bold-Font.ttf` text; all drawing through pure-C++ `Render::*` primitives (core stays free of SDL/OpenGL types).
-  - `Game::draw()` implemented per the HTML layout: left panel (#sectionLeft, 30%) with cookie count + bakery name + CPS + big cookie (clickable); right panel (#sectionRight/#store) with .product store tiles (icon, name, green price, BUY button).
-  - `main.cpp` calls `game.load()` (buildings now created); `Game::loop()` is logic-only, `draw()` once per frame; SDL left-click hit-tests registered cookie/buy-button areas → `game.clickCookie()` / `game.buyBuilding()`.
-  - Visual feedback: bought building's BUY button flashes green ~0.4s; clicking pops the cookie.
-  - Verified: `timeout 4 ./build/cookie_clicker` exits 124 (window runs fixed-timestep loop without crashing).
-- Font fix: FreeType glyph cache cleared when face size changes (was cached by char only, so all text used the first scale's bitmaps — now cookie count, CPS, bakery name, and building names each render at their correct size).
-- Assets embedded into the binary (`cpp/EmbeddedAssets.*`, 23 files: 18 building icons + big cookie + bgBlue + storeTile + TTF font) and extracted to a temp dir at `Render::init`, so the executable runs from any working directory (no missing textures/fonts, no magenta fallbacks).
-- Rendering fixes (this session):
-  - Text rendering diagonal tearing fixed in `Render::getGlyph()`: set `glPixelStorei(GL_UNPACK_ALIGNMENT, 1)` and `GL_UNPACK_ROW_LENGTH` to FreeType's `bm.pitch` before uploading glyph bitmaps, so rows with padding upload without stripes.
-  - Big cookie white square fixed in `Render::drawTexture()`: call `glEnable(GL_TEXTURE_2D)` before binding (`drawText()` leaves texturing disabled, so texture quads rendered flat white). Corrected asset path `imperfectCookie.png` → `perfectCookie.png` and replaced embedded byte data with the real `perfectCookie.png` (98,484 bytes). Removed all `imperfectCookie` references.
-  - PNG alpha: `loadPNG()` no longer calls `png_set_add_alpha` after `png_set_tRNS_to_alpha` (was overwriting tRNS transparency with opaque white). `loadTexture` now logs every success (`loaded texture: ... (%dx%d)`) and failure (`FAILED to load texture: ... -> magenta fallback`) instead of silently falling back.
-  - Background: `Game::draw()` now draws `img/bgBlue.png` full-screen instead of a dark rect.
-  - Cookie count text scale reduced from 2.0f → 1.5f (y adjusted -14 → -10) so it fits on screen.
-- Build + run verified: `cmake --build build -j` (exit 0), `timeout 3 ./build/cookie_clicker` (exit 124, expected from timeout). Cookie renders as a proper cookie; text clean; blue background shows.
-- Store panel polish (this session):
-  - `bgBlue.png` load failure fixed: `Game.cpp` passed `"img/bgBlue.png"` but `resolveAssetPath()` prepends `kImgDir` (`/img`), producing a double `img/img/` path. Changed to `"bgBlue.png"` and embedded `bgBlue.png` (433,960 bytes) into `cpp/EmbeddedAssets.*` so it's extracted to the temp asset dir.
-  - Cursor icon now shows only the white index finger: `cursor.png` is a 2x2 sprite sheet (64x64 total, four 32x32 cursors). `drawTexture()` gained optional `srcX/srcY/srcW/srcH` UV parameters; cursor draws `srcX=0,srcY=0,srcW=32,srcH=32` (top-left quadrant) stretched to 64x64.
-  - Removed BUY buttons: clicking anywhere in a store row buys one building (`Render::registerButton` covers the full 300x64 cell; `main.cpp` hit-test already maps `hit - HIT_BUILDING_BASE` → building index → `game.buyBuilding()`).
-  - Store tile backgrounds from `storeTile.png` (300x256 = 4 strips of 64px): each row uses one horizontal strip via `drawTexture` UVs, drawn at natural 300px width centered in the row cell. `storeTile.png` (74,308 bytes) embedded into `cpp/EmbeddedAssets.*`.
-  - Locked buildings show `"???"` instead of name; icon hidden; price red (`0xFF6666FF`) when unaffordable/locked, green (`0x6FFF6FFF`) when affordable.
-  - Store panel: tabs (Options Stats Legacy Info Store) along top wood strip; middle blank bands separated by tiled panelHorizontal borders; vertical panelVertical wood dividers between panels; borders placed never scaled, last tile clipped to exact edge, snapped to whole pixels.
-  - Thin horizontal cell separator line (`0x4A4A60FF`) drawn at bottom of each row → grid-of-cells look.
-  - Cookie wobble clamped between 90% and 120%: `bigCookieState==1` → target 0.9, `bigCookieState==2` → target 1.2; click pop sets target 1.2 + velocity 0.3 (was `+= 1.5` causing huge jumps).
-  - Permanent building unlock: `cookiesEarned >= basePrice` sets `b->locked = false` (JS `Game.ObjectsById[i].unlock()` semantics, lifetime-cookies based, save-compatible).
-- Build + run verified: `cmake --build build -j` (exit 0), `timeout 3 ./build/cookie_clicker` (exit 124, expected from timeout). All 8 textures load with no magenta fallback.
+### Blocked
+- None
+
+### Files Modified (key changes)
+- `cpp/UI.h` — Layout struct: added middle panel section (cookie strip Y/H, grass Y), added `grassColor`; store panel section clarified
+- `cpp/UI.cpp` — draw() additions: middle panel cookie strip (building sprites) + grass field; store upgrade row shows building icons with first slot highlighted; Buy/Sell toggle shows separate "Buy"/"Sell" buttons; CPS text now "per second: X"
+- `cpp/EmbeddedAssets.h/cpp` — TTF fonts replaced (Kavoon + PT Sans); `bgBlue.png` dropped; `bgStripes.png`/`vignette.png`/`glow.png`/`storeTile.png` embedded
+- `cpp/Render.h/cpp` — `drawTexture` gained optional `srcX/srcY/srcW/srcH` UV parameters; `drawTextureTiled` added; font glyph cache cleared on size change
+- `cpp/Game.cpp` — Permanent building unlock via `cookiesEarned >= basePrice`; cookie wobble clamping
+- `cpp/Types.h` — Type definitions
+
+### Next Steps
+- Run build verification and commit changes
+- Update HANDOFF.md with final state

@@ -39,81 +39,149 @@ struct Toast {
 // Every position / size / spacing used by the UI. Values mirror the current
 // Game::draw() exactly so this refactor stays pixel-identical. A DSi/3DS port
 // can supply its own Layout and reuse the same drawing code.
+// Every position / size / spacing used by the UI. Values mirror the real
+// Cookie Clicker (v2.058) layout measured from screenshots/refs/real_game.png
+// (1920x919) and scaled to the 900x600 desktop window. A DSi/3DS port can
+// supply its own Layout and reuse the same drawing code.
+// ---------------------------------------------------------------------------
 struct Layout {
     // --- panels ------------------------------------------------------------
     f32 leftPanelWidthFraction = 0.30f; // #sectionLeft width (fraction of window)
     i32 storePanelWidth = 318;          // #sectionRight / #store width (px)
 
-    // --- cookie panel ------------------------------------------------------
-    f32 cookieCountYFraction = 0.10f;   // #cookies top (fraction of window height)
-    f32 cookieCountYOffset = -10.0f;
-    f32 cookieCountScale = 1.5f;
+    // --- top menu bar (wooden plank strip spanning from the left panel's
+    //     right edge to the right edge, above the middle + store area) ----
+    i32 topBarY = 0;                    // strip top
+    i32 topBarH = 80;                   // strip height
+    u32 topBarColor = 0xFFFFFFFF;       // wood tint
 
-    f32 bakeryYFraction = 0.10f;        // #bakeryName top
-    f32 bakeryYOffset = 30.0f;
-    f32 bakeryScale = 1.25f;
-    u32 bakeryColor = 0xCCCCCCFF;
+    i32 topBtnY = 26;                   // button top within the strip
+    i32 topBtnH = 34;                   // button height
+    i32 btnPadX = 14;                   // text padding inside a button
+    i32 btnGap = 10;                    // gap between buttons / ticker
 
-    f32 cpsYFraction = 0.10f;           // CPS line
-    f32 cpsYOffset = 46.0f;
-    f32 cpsScale = 0.8f;
-    u32 cpsColor = 0xAAAAFFFF;
+    // Button x positions are relative to the left panel's right edge (leftW)
+    // for Options/Stats, or relative to the right edge for Info/Legacy.
+    i32 btnOptionsX = 16;
+    i32 btnOptionsW = 110;
+    i32 btnStatsX = 140;
+    i32 btnStatsW = 88;
+    i32 btnInfoX = 16;                  // from right edge: storeX + storeW - x - w
+    i32 btnInfoW = 90;
+    i32 btnLegacyX = 116;               // from right edge
+    i32 btnLegacyW = 90;
 
-    // big cookie (#bigCookie 256x256, half-size 128)
-    f32 bigCookieYFraction = 0.40f;
-    f32 bigCookieHalfSize = 128.0f;
+    i32 newsTickerY = 44;               // news ticker baseline
+    f32 newsTickerScale = 0.85f;
+    u32 newsTickerColor = 0xDDDDDDFF;
+
+    // --- cookie panel (left) ----------------------------------------------
+    // Rounded banner with the bakery name (Kavoon heading).
+    // bakeryYFraction is the banner visual-centre position (fraction of height).
+    f32 bakeryYFraction = 0.097f;
+    f32 bakeryScale = 0.7f;
+    u32 bakeryColor = 0xF5F5F5FF;
+    u32 bannerColor = 0x2A2A3AFF;       // banner background fill
+    u32 bannerOutline = 0x8A8A8AFF;
+    f32 bannerPadX = 10.0f;
+    f32 bannerPadY = 3.0f;
+    f32 bannerRadius = 6.0f;
+
+    // "N cookies" large (PT Sans body). cookieCountYFraction is the visual centre.
+    f32 cookieCountYFraction = 0.141f;
+    f32 cookieCountScale = 1.1f;
+    u32 cookieCountColor = 0xFFFFFFFF;
+
+    // "per second: X" small beneath the count. cpsYFraction is the visual centre.
+    f32 cpsYFraction = 0.163f;
+    f32 cpsScale = 0.55f;
+    u32 cpsColor = 0xC8C8C8FF;
+
+    // big cookie (#bigCookie). Centered in the left panel.
+    f32 bigCookieYFraction = 0.388f;
+    f32 bigCookieHalfSize = 40.0f;   // half-width at scale 1.0 (matches real-game proportion)
     f32 bigCookieMinSize = 0.4f;
 
-    // --- middle panel ------------------------------------------------------
-    i32 tabStripY = 90;                 // wood tab strip top
-    i32 tabLabelY = 96;                 // tab label baseline
-    f32 tabLabelScale = 0.9f;
-    i32 tabLabelX[5] = {16, 110, 204, 298, 372};
-    const char* tabLabelText[5] = {"Options", "Stats", "Legacy", "Info", "Store"};
-    i32 numSections = 4;                // blank bands below the tab strip
-    f32 bandMinHeight = 40.0f;
+    // glow behind the cookie (drawn before the cookie).
+    f32 cookieGlowScale = 2.6f;      // glow diameter / cookie diameter
 
-    // --- store panel -------------------------------------------------------
+    // --- middle panel (center) ---------------------------------------------
+    // Game world view between the cookie panel and the store panel.
+    // A cookie strip (building sprites) runs horizontally near the top,
+    // with a green grass field beneath it.
+    i32 middleCookieStripY = 128;    // top of the cookie-sprite strip
+    i32 middleCookieStripH = 48;     // height of the sprite strip
+    i32 middleGrassY = 180;          // top of the green grass field
+
+    // --- store panel (right) ----------------------------------------------
+    // Panel width is a fraction of the window, matching the real game
+    // (store column ~16% of width). Store content (tile, icon, text) is
+    // scaled at draw time by storeW / 304 (the real store panel width in px)
+    // so everything fits and stays proportional.
+    f32 storePanelWidthFraction = 0.158f;
+
+    // Base sizes mirror the real game's store column (~304px wide at 1920px
+    // window width). These are scaled by storeW/304 at draw time.
     i32 storeTitleX = 16;
-    i32 storeTitleY = 48;
-    f32 storeTitleScale = 1.75f;
+    i32 storeTitleY = 44;
+    f32 storeTitleScale = 1.7f;      // Kavoon heading "STORE"
     u32 storeTitleColor = 0xFFFFFFFF;
 
-    i32 storeFirstRowY = 112;           // first row top (below title)
-    i32 storeRowHeight = 64;            // tile height
-    i32 storeRowStep = 72;              // 64px tile + 8px gap
-    i32 storeTileWidth = 300;           // storeTile.png strip width
-    i32 storeTileStripHeight = 64;      // one strip height
+    // Upgrades row (icon slots) beneath the STORE title.
+    i32 upgradesY = 96;
+    i32 upgradeSlotW = 40;
+    i32 upgradeSlotH = 40;
+    i32 upgradeSlotGap = 8;
+    i32 upgradeSlotX = 16;
 
-    i32 storeIconX = 0;                 // icon x relative to storeX
-    i32 storeIconSize = 64;
+    // Buy / Sell toggle beneath the upgrades row.
+    i32 buySellY = 150;
+    i32 buySellH = 26;
+    i32 buySellW = 94;
+    u32 buySellColor = 0xFFFFFFFF;
+    u32 buySellActive = 0xFFD700FF;
 
-    i32 storeNameX = 72;                // main name x (shadow drawn +1,+1)
-    f32 storeNameScale = 1.2f;
+    // Bulk labels "1 / 10 / 100" to the right of the Buy/Sell toggle.
+    i32 bulkY = 150;
+    f32 bulkScale = 0.8f;
+    u32 bulkColor = 0xFFFFFF66;
+    i32 bulkGap = 10;
+
+    // Store rows: contiguous (no separation between elements), no frames.
+    i32 storeFirstRowY = 198;        // first row top (below buy/sell)
+    i32 storeRowHeight = 64;         // row height == row step (contiguous)
+    i32 storeTileWidth = 300;        // storeTile.png strip width (base px)
+    i32 storeTileStripHeight = 64;   // one strip height
+
+    i32 storeIconX = 0;              // icon x relative to storeX (left edge of row cell)
+    i32 storeIconSize = 64;          // icon fills the row height (base px)
+
+    i32 storeNameX = 76;             // name x (64px icon + gap) (base px)
+    f32 storeNameScale = 1.15f;
     u32 storeNameColorEnabled = 0xFFFFFFFF;
     u32 storeNameColorDisabled = 0x888888FF;
-    u32 storeNameShadowColor = 0x000000AA;
 
-    // Price sits right under the name (stacked vertically).
-    i32 storePriceGapBelowName = 4;     // px gap between name baseline and price
-    f32 storePriceScale = 0.8f;
+    // Price stacked below the name, with a small cookie icon before it.
+    f32 storePriceScale = 0.9f;
     u32 storePriceColorAffordable = 0x6FFF6FFF;
     u32 storePriceColorNot = 0xFF6666FF;
-    i32 storePriceRightEdge = 76;       // storeX + storeInnerW - 76
     i32 storePriceIconGap = 6;
 
-    i32 storeOwnedRightMargin = 12;
+    // Big faded owned amount on the right.
+    i32 storeOwnedRightMargin = 14;
     f32 storeOwnedScale = 1.5f;
     u32 storeOwnedColor = 0x00000066;
 
-    u32 storeSeparatorColor = 0x4A4A60FF;
+    // Locked item silhouette (dark shadowed).
+    u32 storeLockedColor = 0x303030FF;
 
     // --- colours -----------------------------------------------------------
-    u32 middlePanelBgColor = 0x2A2A3AFF;
-    u32 storePanelBgColor = 0x00000080;
     u32 bandColor = 0x3A3A4AFF;
     u32 tileColorEnabled = 0xFFFFFFFF;
     u32 tileColorDisabled = 0x555555FF;
+
+    // Grass field colour (middle panel bottom).
+    u32 grassColor = 0x7FC94FFF;
 
     // --- toasts (skeleton) --------------------------------------------------
     f32 toastX = 16.0f;                  // toast area left edge (inside cookie panel)
@@ -124,6 +192,7 @@ struct Layout {
     u32 toastColor = 0xFFFFFFFF;         // toast text color
     u32 toastBgColor = 0x000000B0;       // toast background (semi-transparent dark)
 };
+
 
 class UI {
 public:
@@ -151,7 +220,9 @@ private:
     Layout layout_;
 
     // texture handles (lazily loaded on first draw)
-    i32 bgTex = 0;
+    i32 bgStripesTex = 0;
+    i32 vignetteTex = 0;
+    i32 glowTex = 0;
     i32 cookieTex = 0;
     i32 panelHorizTex = 0;
     i32 panelVertTex = 0;
