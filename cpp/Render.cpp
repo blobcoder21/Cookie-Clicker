@@ -536,13 +536,13 @@ void ensureFace(f32 ptSize) {
         return;
     }
     if (!g_face) {
-        // Try Merriweather fonts from cwd first (preferred per style.css),
-        // then fall back to embedded Tahoma.
+        // Try embedded Tahoma first (the project's standard font), then
+        // fall back to Merriweather from cwd if present.
         std::vector<std::string> fontPaths = {
+            std::string(kFontDir) + "/Tahoma-Bold-Font.ttf",
             "fonts/Merriweather_24pt-Bold.ttf",
             "fonts/Merriweather-VariableFont_opsz,wdth,wght.ttf",
             "fonts/Merriweather_24pt-Regular.ttf",
-            std::string(kFontDir) + "/Tahoma-Bold-Font.ttf",
         };
         bool loaded = false;
         for (const auto& path : fontPaths) {
