@@ -89,13 +89,13 @@ struct Layout {
     i32 storeIconSize = 64;
 
     i32 storeNameX = 72;                // main name x (shadow drawn +1,+1)
-    i32 storeNameY = 8;
     f32 storeNameScale = 1.2f;
     u32 storeNameColorEnabled = 0xFFFFFFFF;
     u32 storeNameColorDisabled = 0x888888FF;
     u32 storeNameShadowColor = 0x000000AA;
 
-    i32 storePriceY = 8;
+    // Price sits right under the name (stacked vertically).
+    i32 storePriceGapBelowName = 4;     // px gap between name baseline and price
     f32 storePriceScale = 0.8f;
     u32 storePriceColorAffordable = 0x6FFF6FFF;
     u32 storePriceColorNot = 0xFF6666FF;

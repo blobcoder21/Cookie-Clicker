@@ -300,19 +300,25 @@ void UI::draw() {
                                 srcX, srcY, srcW, srcH);
         }
 
-        // building name (.product .content, left 64px) — "???" when locked
+        // building name (.product .content, left 64px) — "???" when locked.
+        // Name is vertically centred in the cell, slightly above centre per Image 2.
         std::string displayName = isLocked ? "???" : b->name;
         u32 nameColor = isEnabled ? layout_.storeNameColorEnabled : layout_.storeNameColorDisabled;
+        f32 nameScale = layout_.storeNameScale;
+        f32 nameCx = render_.measureTextCenterY(displayName.c_str(), nameScale);
+        f32 nameY = static_cast<f32>(rowY + 32) - nameCx; // centre of 64px cell
         // text shadow (dark offset behind main text)
-        render_.drawText(static_cast<f32>(storeX + layout_.storeNameX + 1), static_cast<f32>(rowY + layout_.storeNameY + 1), displayName.c_str(),
-                         layout_.storeNameShadowColor, layout_.storeNameScale);
-        render_.drawText(static_cast<f32>(storeX + layout_.storeNameX), static_cast<f32>(rowY + layout_.storeNameY), displayName.c_str(),
-                         nameColor, layout_.storeNameScale);
+        render_.drawText(static_cast<f32>(storeX + layout_.storeNameX + 1), nameY + 1.0f, displayName.c_str(),
+                         layout_.storeNameShadowColor, nameScale);
+        render_.drawText(static_cast<f32>(storeX + layout_.storeNameX), nameY, displayName.c_str(),
+                         nameColor, nameScale);
 
         // price (.price: green #6f6 when affordable, red #f66 when locked/unaffordable)
+        // Stacked right under the name, per Image 2.
         std::string priceStr = formatCookies(b->getPrice());
         f32 pw = render_.measureText(priceStr.c_str(), layout_.storePriceScale);
         u32 priceColor = isEnabled ? layout_.storePriceColorAffordable : layout_.storePriceColorNot;
+        f32 priceY = nameY + nameScale * 14.0f + static_cast<f32>(layout_.storePriceGapBelowName);
         // small cookie icon before price (16x16 at natural size, clipped to cell)
         if (!priceCookieTex) priceCookieTex = render_.loadTexture("smallCookies.png");
         f32 priceIconW = 0.0f, priceIconH = 0.0f;
@@ -324,14 +330,14 @@ void UI::draw() {
             f32 iconScale = 16.0f / static_cast<f32>(priceIconW);
             f32 iconDrawW = static_cast<f32>(priceIconW) * iconScale;
             f32 iconDrawH = static_cast<f32>(priceIconH) * iconScale;
-            f32 iconY = static_cast<f32>(rowY + layout_.storePriceY) + (14.0f - iconDrawH) / 2.0f;
+            f32 iconY = priceY + (14.0f - iconDrawH) / 2.0f;
             render_.drawTexture(priceCookieTex,
                                 static_cast<f32>(storeX + storeInnerW - layout_.storePriceRightEdge) - pw - iconDrawW - static_cast<f32>(layout_.storePriceIconGap),
                                 iconY,
                                 iconDrawW, iconDrawH, priceColor);
         }
         render_.drawText(static_cast<f32>(storeX + storeInnerW - layout_.storePriceRightEdge) - pw,
-                         static_cast<f32>(rowY + layout_.storePriceY), priceStr.c_str(),
+                         priceY, priceStr.c_str(),
                          priceColor, layout_.storePriceScale);
 
         // big faded amount-owned (.product .content .owned)
