@@ -1,5 +1,6 @@
 #include "Game.h"
 #include "Render.h"
+#include "UI.h"
 #include "Audio.h"
 #include "Assets.h"
 
@@ -25,13 +26,16 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    Render::init(window);
+    Render render;
+    render.init(window);
     Audio::init();
     Assets::init();
 
     Game game;
     game.launch();
     game.load(); // populate buildings, wrinklers, buff types
+
+    UI ui(game, render);
 
     bool running = true;
     SDL_Event event;
@@ -66,27 +70,33 @@ int main(int argc, char** argv) {
             accumulator -= targetDt;
         }
 
-        Render::newFrame();
-        game.draw();                // draw once per rendered frame
-        Render::render();
+        render.newFrame();
+        ui.draw();                  // draw once per rendered frame (owned by UI)
+        render.render();
 
-        // handle input against this frame's clickable areas (cookie / buy buttons)
+        // handle input through the UI layer: a pointer click returns a game
+        // action that the main loop applies to Game. No hit-testing outside UI.
         if (clickPending) {
-            i32 hit = Render::hitTest(clickX, clickY);
-            if (hit == Render::HIT_COOKIE) {
+            GameAction action = ui.on_pointer(clickX, clickY);
+            switch (action.type) {
+            case GameAction::Type::ClickCookie:
                 game.clickCookie();
-            } else if (hit >= Render::HIT_BUILDING_BASE) {
-                i32 idx = hit - Render::HIT_BUILDING_BASE;
-                if (idx >= 0 && idx < static_cast<i32>(game.objects.size())) {
-                    game.buyBuilding(game.objects[static_cast<size_t>(idx)].get());
+                break;
+            case GameAction::Type::BuyBuilding:
+                if (action.buildingIndex >= 0 &&
+                    action.buildingIndex < static_cast<i32>(game.objects.size())) {
+                    game.buyBuilding(game.objects[static_cast<size_t>(action.buildingIndex)].get());
                 }
+                break;
+            case GameAction::Type::None:
+                break;
             }
         }
 
         SDL_Delay(1);
     }
 
-    Render::shutdown();
+    render.shutdown();
     SDL_DestroyWindow(window);
     SDL_Quit();
     return 0;
