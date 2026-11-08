@@ -288,54 +288,57 @@ void UI::draw() {
     // Each button gets its own wood plank background; the news ticker area
     // between them stays dark.
 
-    // Options button
+    // Left column: Options on top, Stats below.
     {
+        // Options button (top-left corner).
         f32 bx = static_cast<f32>(leftW + layout_.btnOptionsX);
         f32 by = static_cast<f32>(layout_.topBtnY);
         drawWoodStrip(bx, by, static_cast<f32>(layout_.btnOptionsW),
                       static_cast<f32>(layout_.topBtnH));
         render_.drawText(bx + layout_.btnPadX, by + layout_.topBtnH / 2.0f,
                          "Options", 0xFFFFFFFF, layout_.newsTickerScale, body);
-    }
-    // Stats button
-    {
-        f32 bx = static_cast<f32>(leftW + layout_.btnStatsX);
-        f32 by = static_cast<f32>(layout_.topBtnY);
-        drawWoodStrip(bx, by, static_cast<f32>(layout_.btnStatsW),
+        // Stats button directly below Options.
+        f32 sx2 = static_cast<f32>(leftW + layout_.btnStatsX);
+        f32 sy2 = static_cast<f32>(layout_.topBtnY + layout_.topBtnH + 4.0f);
+        drawWoodStrip(sx2, sy2, static_cast<f32>(layout_.btnStatsW),
                       static_cast<f32>(layout_.topBtnH));
-        render_.drawText(bx + layout_.btnPadX, by + layout_.topBtnH / 2.0f,
+        render_.drawText(sx2 + layout_.btnPadX, sy2 + layout_.topBtnH / 2.0f,
                          "Stats", 0xFFFFFFFF, layout_.newsTickerScale, body);
     }
-    // news ticker area (between the button groups)
+    // Right column: Info on top, Legacy below.
     {
-        f32 tx = static_cast<f32>(leftW + layout_.btnStatsX + layout_.btnStatsW + layout_.btnGap);
-        f32 tw = buttonRightEdge(layout_.btnLegacyX, layout_.btnLegacyW) - tx;
-        if (tw > 0) {
-            // news ticker: plain dark strip behind the scrolling text
-            render_.drawRect(tx, static_cast<f32>(layout_.topBarY + 10),
-                             tw, static_cast<f32>(layout_.topBarH - 20), 0x00000080);
-            render_.drawText(tx, static_cast<f32>(layout_.newsTickerY),
-                             "Your family agrees to try some of your cookies.",
-                             layout_.newsTickerColor, layout_.newsTickerScale, body);
-        }
-    }
-    // Info button
-    {
+        // Info button (top-right corner).
         f32 bx = buttonRightEdge(layout_.btnInfoX, layout_.btnInfoW);
         f32 by = static_cast<f32>(layout_.topBtnY);
         drawWoodStrip(bx, by, static_cast<f32>(layout_.btnInfoW),
                       static_cast<f32>(layout_.topBtnH));
         render_.drawText(bx + layout_.btnPadX, by + layout_.topBtnH / 2.0f,
                          "Info", 0xFFFFFFFF, layout_.newsTickerScale, body);
-    }
-    // Legacy button
-    {
-        f32 bx = buttonRightEdge(layout_.btnLegacyX, layout_.btnLegacyW);
-        f32 by = static_cast<f32>(layout_.topBtnY);
-        drawWoodStrip(bx, by, static_cast<f32>(layout_.btnLegacyW),
+        // Legacy button directly below Info.
+        f32 lx2 = buttonRightEdge(layout_.btnLegacyX, layout_.btnLegacyW);
+        f32 ly2 = static_cast<f32>(layout_.topBtnY + layout_.topBtnH + 4.0f);
+        drawWoodStrip(lx2, ly2, static_cast<f32>(layout_.btnLegacyW),
                       static_cast<f32>(layout_.topBtnH));
-        render_.drawText(bx + layout_.btnPadX, by + layout_.topBtnH / 2.0f,
+        render_.drawText(lx2 + layout_.btnPadX, ly2 + layout_.topBtnH / 2.0f,
                          "Legacy", 0xFFFFFFFF, layout_.newsTickerScale, body);
+    }
+    // news ticker area (centered between the left and right button groups)
+    {
+        f32 leftEdge = static_cast<f32>(leftW + layout_.btnOptionsX + layout_.btnOptionsW + layout_.btnGap);
+        f32 rightEdge = buttonRightEdge(layout_.btnInfoX, layout_.btnInfoW);
+        f32 tw = rightEdge - leftEdge;
+        if (tw > 0) {
+            // Center the ticker text horizontally.
+            std::string tickerText = "Your family agrees to try some of your cookies.";
+            f32 twText = render_.measureText(tickerText.c_str(), layout_.newsTickerScale, body);
+            f32 tx = leftEdge + (tw - twText) / 2.0f;
+            // news ticker: plain dark strip behind the scrolling text
+            render_.drawRect(leftEdge, static_cast<f32>(layout_.topBarY + 10),
+                             tw, static_cast<f32>(layout_.topBarH - 20), 0x00000080);
+            render_.drawText(tx, static_cast<f32>(layout_.newsTickerY),
+                             tickerText.c_str(), layout_.newsTickerColor,
+                             layout_.newsTickerScale, body);
+        }
     }
 
     // ------------------------------------------------------------------

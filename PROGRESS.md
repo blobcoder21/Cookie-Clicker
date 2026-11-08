@@ -23,14 +23,15 @@
 | Left panel width | 0.30 | 0.30 | ✅ |
 
 ### Active
-- Cookie y-centre: port ~330 vs real 357 — being resolved via `bigCookieYFraction` and size scaling
+- None
 
 ### Blocked
 - None
 
 ### Files Modified (key changes)
-- `cpp/UI.h` — Layout struct: added middle panel section (cookie strip Y/H, grass Y), added `grassColor`; store panel section clarified
-- `cpp/UI.cpp` — draw() additions: middle panel cookie strip (building sprites) + grass field; store upgrade row shows building icons with first slot highlighted; Buy/Sell toggle shows separate "Buy"/"Sell" buttons; CPS text now "per second: X"
+- `cpp/UI.h` — Layout struct: added middle panel section (cookie strip Y/H, grass Y), added `grassColor`; top bar buttons restacked (Options+Stats left column, Info+Legacy right column); store panel section clarified
+- `cpp/UI.cpp` — draw() additions: middle panel cookie strip (building sprites) + grass field; top bar buttons stacked vertically in corners with centered news ticker; store upgrade row shows building icons with first slot highlighted; Buy/Sell toggle shows separate "Buy"/"Sell" buttons; CPS text now "per second: X"
+- `cpp/main.cpp` — window size changed from 900x600 (3:2) to 1280x720 (16:9) to match Image 2 aspect ratio
 - `cpp/EmbeddedAssets.h/cpp` — TTF fonts replaced (Kavoon + PT Sans); `bgBlue.png` dropped; `bgStripes.png`/`vignette.png`/`glow.png`/`storeTile.png` embedded
 - `cpp/Render.h/cpp` — `drawTexture` gained optional `srcX/srcY/srcW/srcH` UV parameters; `drawTextureTiled` added; font glyph cache cleared on size change
 - `cpp/Game.cpp` — Permanent building unlock via `cookiesEarned >= basePrice`; cookie wobble clamping

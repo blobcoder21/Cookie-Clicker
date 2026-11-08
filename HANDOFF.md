@@ -4,7 +4,7 @@
 UI layer extracted from Game. All layout lives in `cpp/UI.h` Layout struct, all drawing in `cpp/UI.cpp`. Core `Game` knows nothing of SDL, OpenGL, FreeType, or rendering. Input flows `UI::on_pointer(x,y)` → game action → main loop applies to `Game`.
 
 ## DONE — UI Layer Extraction
-- Native SDL2 desktop window (900x600, resizable, OpenGL) via `main.cpp`.
+- Native SDL2 desktop window (**1280x720, 16:9**, resizable, OpenGL) via `main.cpp`.
 - `Game` has **no `draw()` function** and includes **no `Render` or `UI` headers**. Core compiles with only logic headers.
 - `UI` takes `const Game&` and `Render&`, owns **all** layout, drawing, and hit-testing.
 - Input goes `UI::on_pointer(x, y)` → returns a game action → main loop applies it to `Game`.
@@ -25,7 +25,7 @@ UI layer extracted from Game. All layout lives in `cpp/UI.h` Layout struct, all 
 ## UI Features (matching real v2.058)
 - **Left panel**: Rounded banner with Kavoon heading (bakery name), "N cookies" large (PT Sans), "per second: X" small (PT Sans), big cookie (#bigCookie) centered with soft glow, clickable
 - **Middle panel**: Game world view between cookie panel and store panel — cookie strip with unlocked building sprites running horizontally near the top, green grass field beneath
-- **Top menu bar**: Wooden plank strip with Options/Stats buttons on left, news ticker text in centre, Info/Legacy buttons on right
+- **Top menu bar**: Wooden plank strips per button (no continuous background). Options+Stats stacked top-left column, Info+Legacy stacked top-right column, centered news ticker text between them
 - **Store panel** (right): ~16% of window width. "STORE" title (Kavoon heading). Upgrade icon row (6 slots with building icons, first unlocked highlighted). Buy/Sell toggle with separate "Buy"/"Sell" buttons and bulk labels "1 / 10 / 100". Contiguous store rows (no separators/frames): each row has icon, name ("???" when locked), price with small cookie icon, faded owned amount bottom-right. Locked items show dark silhouette. Full-row click to buy.
 - **Background**: Three layers — `bgStripes.png` tiled vertically, `vignette.png` radial gradient, `glow.png` drawn behind cookie
 - **Fonts**: Kavoon for headings, PT Sans for body text. Zero Tahoma references.

@@ -18,7 +18,7 @@ int main(int argc, char** argv) {
     }
 
     SDL_Window* window = SDL_CreateWindow(
-        "Cookie Clicker (C++ port)", 100, 100, 900, 600,
+        "Cookie Clicker (C++ port)", 100, 100, 1280, 720,
         SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
     if (!window) {
         std::cerr << "SDL_CreateWindow Error: " << SDL_GetError() << std::endl;

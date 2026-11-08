@@ -62,13 +62,15 @@ struct Layout {
 
     // Button x positions are relative to the left panel's right edge (leftW)
     // for Options/Stats, or relative to the right edge for Info/Legacy.
+    // Layout matches Image 2: Options+Stats stacked top-left,
+    // Info+Legacy stacked top-right.
     i32 btnOptionsX = 16;
     i32 btnOptionsW = 110;
-    i32 btnStatsX = 140;
-    i32 btnStatsW = 88;
+    i32 btnStatsX = 16;
+    i32 btnStatsW = 110;
     i32 btnInfoX = 16;                  // from right edge: storeX + storeW - x - w
     i32 btnInfoW = 90;
-    i32 btnLegacyX = 116;               // from right edge
+    i32 btnLegacyX = 16;                // from right edge
     i32 btnLegacyW = 90;
 
     i32 newsTickerY = 44;               // news ticker baseline
