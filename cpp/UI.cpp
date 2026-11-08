@@ -80,6 +80,30 @@ i32 UI::loadIcon(const std::string& iconPath) {
     return handle;
 }
 
+void UI::update(f32 dt) {
+    // Decrement toast lifetimes and drop expired ones (skeleton).
+    for (auto it = toasts.begin(); it != toasts.end();) {
+        it->life -= dt;
+        if (it->life <= 0.0f) {
+            it = toasts.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+void UI::notify(const std::string& text) {
+    Toast t;
+    t.text = text;
+    t.life = layout_.toastLife;
+    t.maxLife = layout_.toastLife;
+    t.active = true;
+    // Position: stack from the bottom of the cookie panel upwards.
+    // y is set at draw time based on how many toasts are active.
+    (void)t;
+    toasts.push_back(std::move(t));
+}
+
 void UI::draw() {
     // drawT was a per-frame draw counter; it is not used for any decision, so
     // it is intentionally not maintained here (no behavioural impact).
@@ -337,6 +361,22 @@ void UI::draw() {
 
         rowY += layout_.storeRowStep; // 64px tile + 8px gap
         ++row;
+    }
+
+    // --- toasts (skeleton): draw stacked upward from bottom-left of cookie panel
+    if (!toasts.empty()) {
+        i32 leftW = static_cast<i32>(static_cast<f32>(render_.windowW()) * layout_.leftPanelWidthFraction);
+        f32 toastY = static_cast<f32>(render_.windowH()) - 40.0f; // start near bottom of screen
+        for (auto& t : toasts) {
+            f32 tw = render_.measureText(t.text.c_str(), layout_.toastScale);
+            // background pill
+            render_.drawRect(layout_.toastX - 4.0f, toastY - 4.0f,
+                             tw + 8.0f, static_cast<f32>(16 * layout_.toastScale) + 8.0f,
+                             layout_.toastBgColor);
+            render_.drawText(layout_.toastX, toastY, t.text.c_str(),
+                             layout_.toastColor, layout_.toastScale);
+            toastY -= layout_.toastSpacing;
+        }
     }
 }
 

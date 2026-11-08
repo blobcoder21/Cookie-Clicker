@@ -6,6 +6,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 // ---------------------------------------------------------------------------
 // UI layer — owns all layout, drawing, and hit-testing.
@@ -22,6 +23,17 @@ struct GameAction {
     enum class Type : i32 { None, ClickCookie, BuyBuilding };
     Type type = Type::None;
     i32 buildingIndex = -1; // index into Game::objects (BuyBuilding only)
+};
+
+// A transient on-screen notification (toast). Skeleton: data + lifecycle
+// only; styling and placement are intentionally minimal so they can be
+// refined later without touching Game or Render.
+struct Toast {
+    std::string text;
+    f32 life = 0.0f;      // seconds remaining
+    f32 maxLife = 0.0f;   // total lifetime
+    f32 y = 0.0f;         // screen y (top-down), set when spawned
+    bool active = false;
 };
 
 // Every position / size / spacing used by the UI. Values mirror the current
@@ -102,6 +114,15 @@ struct Layout {
     u32 bandColor = 0x3A3A4AFF;
     u32 tileColorEnabled = 0xFFFFFFFF;
     u32 tileColorDisabled = 0x555555FF;
+
+    // --- toasts (skeleton) --------------------------------------------------
+    f32 toastX = 16.0f;                  // toast area left edge (inside cookie panel)
+    f32 toastYStart = 0.0f;              // set at draw time: bottom area of cookie panel
+    f32 toastSpacing = 26.0f;            // vertical gap between toasts
+    f32 toastScale = 0.8f;               // text scale
+    f32 toastLife = 4.0f;                // seconds each toast stays on screen
+    u32 toastColor = 0xFFFFFFFF;         // toast text color
+    u32 toastBgColor = 0x000000B0;       // toast background (semi-transparent dark)
 };
 
 class UI {
@@ -112,9 +133,17 @@ public:
     // Draw one frame: background, cookie panel, middle panel, store panel.
     void draw();
 
+    // Update per-frame UI state (toast lifetimes, etc.). Called from the main
+    // loop each fixed timestep.
+    void update(f32 dt);
+
     // Report a pointer click at (x, y). Returns the game action the main
     // loop should apply to Game. No hit-testing happens outside this class.
     GameAction on_pointer(i32 x, i32 y);
+
+    // Queue a transient on-screen notification (toast). Skeleton: text +
+    // lifetime; styling/placement refined later.
+    void notify(const std::string& text);
 
 private:
     const Game& game_;
@@ -131,6 +160,9 @@ private:
 
     // building-icon texture cache (logical path -> handle)
     std::unordered_map<std::string, i32> iconTexCache;
+
+    // active toasts (skeleton)
+    std::vector<Toast> toasts;
 
     i32 loadIcon(const std::string& iconPath);
 };

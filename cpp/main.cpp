@@ -67,6 +67,7 @@ int main(int argc, char** argv) {
         // fixed-timestep logic, mirroring the JS setTimeout loop (~30 FPS)
         while (accumulator >= targetDt) {
             game.loop();            // logic only; draw happens once per frame below
+            ui.update(targetDt);    // per-frame UI state (toast lifetimes, etc.)
             accumulator -= targetDt;
         }
 
