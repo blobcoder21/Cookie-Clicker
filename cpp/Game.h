@@ -204,7 +204,6 @@ public:
     // --- main loop ---------------------------------------------------------
     void loop();                   // one frame: logic + draw
     void logic(f64 dt);            // Game.Logic
-    void draw();                   // Game.Draw
 
     // --- economy -----------------------------------------------------------
     void earn(f64 howmuch);
@@ -234,8 +233,13 @@ public:
     bool importSaveCode(const std::string& code);
 
     // --- misc --------------------------------------------------------------
-    std::string getBakeryName();
+    std::string getBakeryName() const;
     void recalculateGainsFlag() { recalculateGains_ = true; }
+
+    // --- read-only access for the UI layer (animation / feedback state) ----
+    f64 bigCookieSizeValue() const { return bigCookieSize; }
+    i32 flashBuildingIndexValue() const { return flashBuildingIndex; }
+    i32 flashFramesValue() const { return flashFrames; }
 
 private:
     bool recalculateGains_ = true;
