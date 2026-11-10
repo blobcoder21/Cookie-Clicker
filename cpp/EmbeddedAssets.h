@@ -40,12 +40,16 @@ namespace EmbeddedAssets {
   extern unsigned int img_javascriptconsole_png_len;
   extern unsigned char img_idleverse_png[];
   extern unsigned int img_idleverse_png_len;
-  extern unsigned char img_bgBlue_png[];
-  extern unsigned int img_bgBlue_png_len;
   extern unsigned char img_storeTile_png[];
   extern unsigned int img_storeTile_png_len;
-  extern unsigned char fonts_Tahoma_Bold_Font_ttf[];
-  extern unsigned int fonts_Tahoma_Bold_Font_ttf_len;
+  extern unsigned char img_bgStripes_png[];
+  extern unsigned int img_bgStripes_png_len;
+  extern unsigned char img_vignette_png[];
+  extern unsigned int img_vignette_png_len;
+  extern unsigned char img_glow_png[];
+  extern unsigned int img_glow_png_len;
   extern unsigned char fonts_Kavoon_Regular_ttf[];
   extern unsigned int fonts_Kavoon_Regular_ttf_len;
+  extern unsigned char fonts_PTSans_Regular_ttf[];
+  extern unsigned int fonts_PTSans_Regular_ttf_len;
 } // namespace EmbeddedAssets

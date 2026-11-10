@@ -277,6 +277,13 @@ void Game::logic(f64 dt) {
     bigCookieSizeD += (bigCookieSizeT - bigCookieSize) * 0.75;
     bigCookieSizeD *= 0.75;
     bigCookieSize += bigCookieSizeD;
+    // Snap to rest when the spring has settled, so the cookie doesn't keep
+    // micro-wobbling forever after a click.
+    if (std::fabs(bigCookieSizeT - bigCookieSize) < 0.001 &&
+        std::fabs(bigCookieSizeD) < 0.001) {
+        bigCookieSize = bigCookieSizeT;
+        bigCookieSizeD = 0.0;
+    }
     bigCookieSize = std::max(0.1, bigCookieSize);
 
     // milk progress

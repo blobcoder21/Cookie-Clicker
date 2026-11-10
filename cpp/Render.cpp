@@ -53,27 +53,27 @@ std::string kFontDir = "fonts";
 //
 // Fonts are resolved by internal ID so reserved font names (per SIL OFL,
 // e.g. Merriweather) never leak out of the render backend as filename
-// strings. The default game font is Kavoon-Regular from cwd fonts/;
-// the embedded Tahoma is the internal fallback.
-// ---------------------------------------------------------------------------
+// strings. Default = Kavoon-Regular (headings); Body = PT Sans-Regular.
+// kFontDir points to the extracted temp dir at init (self-contained),
+// falling back to cwd fonts/ for dev runs.
 std::string internalFontPath(InternalFont id) {
     switch (id) {
     case InternalFont::Default:
-        return "fonts/Kavoon-Regular.ttf";
-    case InternalFont::Fallback:
-        return std::string(kFontDir) + "/Tahoma-Bold-Font.ttf";
+        return std::string(kFontDir) + "/Kavoon-Regular.ttf";
+    case InternalFont::Body:
+        return std::string(kFontDir) + "/PTSans-Regular.ttf";
     }
-    return std::string(kFontDir) + "/Tahoma-Bold-Font.ttf";
+    return std::string(kFontDir) + "/Kavoon-Regular.ttf";
 }
 
 std::string internalFontFontName(InternalFont id) {
     switch (id) {
     case InternalFont::Default:
         return "Kavoon-Regular.ttf";
-    case InternalFont::Fallback:
-        return "Tahoma-Bold-Font.ttf";
+    case InternalFont::Body:
+        return "PTSans-Regular.ttf";
     }
-    return "Tahoma-Bold-Font.ttf";
+    return "Kavoon-Regular.ttf";
 }
 
 // Temp dir holding extracted embedded assets (cleaned up on shutdown)
@@ -96,7 +96,7 @@ std::string toLower(const std::string& s) {
 // executable is self-contained regardless of working directory)
 // ---------------------------------------------------------------------------
 struct EmbeddedFile {
-    const char* virtualPath;  // e.g. "img/farm.png" or "fonts/Tahoma-Bold-Font.ttf"
+    const char* virtualPath;  // e.g. "img/farm.png" or "fonts/PTSans-Regular.ttf"
     const unsigned char* data;
     size_t len;
 };
@@ -121,10 +121,12 @@ static const EmbeddedFile g_embeddedFiles[] = {
     {"img/fractalEngine.png", EmbeddedAssets::img_fractalEngine_png, EmbeddedAssets::img_fractalEngine_png_len},
     {"img/javascriptconsole.png", EmbeddedAssets::img_javascriptconsole_png, EmbeddedAssets::img_javascriptconsole_png_len},
     {"img/idleverse.png", EmbeddedAssets::img_idleverse_png, EmbeddedAssets::img_idleverse_png_len},
-    {"img/bgBlue.png", EmbeddedAssets::img_bgBlue_png, EmbeddedAssets::img_bgBlue_png_len},
     {"img/storeTile.png", EmbeddedAssets::img_storeTile_png, EmbeddedAssets::img_storeTile_png_len},
-    {"fonts/Tahoma-Bold-Font.ttf", EmbeddedAssets::fonts_Tahoma_Bold_Font_ttf, EmbeddedAssets::fonts_Tahoma_Bold_Font_ttf_len},
+    {"img/bgStripes.png", EmbeddedAssets::img_bgStripes_png, EmbeddedAssets::img_bgStripes_png_len},
+    {"img/vignette.png", EmbeddedAssets::img_vignette_png, EmbeddedAssets::img_vignette_png_len},
+    {"img/glow.png", EmbeddedAssets::img_glow_png, EmbeddedAssets::img_glow_png_len},
     {"fonts/Kavoon-Regular.ttf", EmbeddedAssets::fonts_Kavoon_Regular_ttf, EmbeddedAssets::fonts_Kavoon_Regular_ttf_len},
+    {"fonts/PTSans-Regular.ttf", EmbeddedAssets::fonts_PTSans_Regular_ttf, EmbeddedAssets::fonts_PTSans_Regular_ttf_len},
 };
 
 bool writeFile(const std::string& path, const unsigned char* data, size_t len) {
@@ -553,9 +555,13 @@ struct Glyph {
     i32 advance = 0; // in 26.6 fixed point -> pixels
 };
 std::unordered_map<char, Glyph> g_glyphs;
-f32 g_currentPtSize = 0.0f; // tracked so we can reload glyphs when size changes
+f32 g_currentPtSize = 0.0f;   // tracked so we can reload glyphs when size changes
+InternalFont g_currentFont = InternalFont::Default; // tracked so we reload when face changes
 
-void ensureFace(f32 ptSize) {
+// Load / select the FreeType face for `font` and set the character size.
+// Glyphs are keyed by character only, so the cache is cleared whenever the
+// face or the point size changes.
+void ensureFace(f32 ptSize, InternalFont font) {
     if (!g_ft) {
         static bool logged_ft = false;
         if (!logged_ft) {
@@ -564,37 +570,34 @@ void ensureFace(f32 ptSize) {
         }
         return;
     }
-    if (!g_face) {
-        // Resolve fonts by internal ID so reserved font names (per SIL OFL,
-        // e.g. Merriweather) never leak out of the render backend as filename
-        // strings. Default = Kavoon-Regular; fallback = embedded Tahoma.
-        // kFontDir points to the extracted temp dir at init (self-contained),
-        // falling back to cwd fonts/ for dev runs.
+    bool needNewFace = (g_face == nullptr) || (font != g_currentFont);
+    if (needNewFace) {
         std::vector<std::string> fontPaths = {
-            std::string(kFontDir) + "/" + internalFontFontName(InternalFont::Default),
-            std::string(kFontDir) + "/" + internalFontFontName(InternalFont::Fallback),
-            internalFontFontName(InternalFont::Default),
-            internalFontFontName(InternalFont::Fallback),
+            internalFontPath(font),
+            internalFontFontName(font), // dev run from cwd
         };
-        bool loaded = false;
+        FT_Face newFace = nullptr;
         for (const auto& path : fontPaths) {
-            if (FT_New_Face(g_ft, path.c_str(), 0, &g_face) == 0) {
-                loaded = true;
+            if (FT_New_Face(g_ft, path.c_str(), 0, &newFace) == 0) {
                 break;
             }
         }
-        if (!loaded) {
+        if (newFace == nullptr) {
             g_face = nullptr;
             static bool logged_font = false;
             if (!logged_font) {
-                std::fprintf(stderr, "[Render] failed to load any font\n");
+                std::fprintf(stderr, "[Render] failed to load font '%s'\n",
+                             internalFontFontName(font).c_str());
                 logged_font = true;
             }
             return;
         }
+        if (g_face) FT_Done_Face(g_face);
+        g_face = newFace;
+        g_currentFont = font;
+        g_glyphs.clear();
     }
-    // Reload glyphs whenever the face size changes, since g_glyphs is keyed
-    // by character only and FT_Load_Char renders at the current face size.
+    // Reload glyphs whenever the face size changes (or the face changed).
     if (g_face && ptSize != g_currentPtSize) {
         FT_Set_Char_Size(g_face, 0, static_cast<FT_F26Dot6>(ptSize * 64), 96, 96);
         g_currentPtSize = ptSize;
@@ -634,9 +637,10 @@ Glyph& getGlyph(char c) {
     return g_glyphs[c] = g;
 }
 
-void Render::drawText(f32 x, f32 y, const char* text, u32 color, f32 scale) {
+void Render::drawText(f32 x, f32 y, const char* text, u32 color, f32 scale,
+                             InternalFont font) {
     if (!text) return;
-    ensureFace(16.0f * scale);
+    ensureFace(16.0f * scale, font);
 
     f32 r = ((color >> 24) & 0xFF) / 255.0f;
     f32 g_ = ((color >> 16) & 0xFF) / 255.0f;
@@ -672,9 +676,9 @@ void Render::drawText(f32 x, f32 y, const char* text, u32 color, f32 scale) {
     glColor4f(1, 1, 1, 1);
 }
 
-f32 Render::measureText(const char* text, f32 scale) {
+f32 Render::measureText(const char* text, f32 scale, InternalFont font) {
     if (!text) return 0.0f;
-    ensureFace(16.0f * scale);
+    ensureFace(16.0f * scale, font);
     f32 w = 0.0f;
     for (const char* p = text; *p; ++p) {
         if (*p == ' ') { w += 8.0f * scale; continue; }
@@ -685,9 +689,9 @@ f32 Render::measureText(const char* text, f32 scale) {
     return w;
 }
 
-f32 Render::measureTextCenterY(const char* text, f32 scale) {
+f32 Render::measureTextCenterY(const char* text, f32 scale, InternalFont font) {
     if (!text) return 0.0f;
-    ensureFace(16.0f * scale);
+    ensureFace(16.0f * scale, font);
     f32 maxTop = 0.0f;
     f32 maxBottom = 0.0f;
     bool first = true;

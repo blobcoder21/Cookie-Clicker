@@ -11,8 +11,8 @@
 // The PC backend maps each internal ID to an on-disk path inside Render.cpp.
 // ---------------------------------------------------------------------------
 enum class InternalFont : i32 {
-    Default = 0,   // primary game font (Kavoon-Regular on PC)
-    Fallback = 1,  // embedded fallback (Tahoma)
+    Default = 0,  // primary game font (Kavoon-Regular on PC) — large headings
+    Body = 1,     // body text (PT Sans-Regular on PC)
 };
 
 // ---------------------------------------------------------------------------
@@ -40,11 +40,11 @@ public:
     // color is 0xRRGGBBAA
     void drawRect(f32 x, f32 y, f32 w, f32 h, u32 color);
     void drawText(f32 x, f32 y, const char* text, u32 color,
-                         f32 scale = 1.0f);
-    f32 measureText(const char* text, f32 scale = 1.0f);
+                         f32 scale = 1.0f, InternalFont font = InternalFont::Default);
+    f32 measureText(const char* text, f32 scale = 1.0f, InternalFont font = InternalFont::Default);
     // Returns the offset from drawText's y to the text's visual vertical centre
     // (typically negative for digits, since the centre sits above y).
-    f32 measureTextCenterY(const char* text, f32 scale = 1.0f);
+    f32 measureTextCenterY(const char* text, f32 scale = 1.0f, InternalFont font = InternalFont::Default);
 
     // Images (loaded from img/) ---------------------------------------------
     i32 loadTexture(const std::string& path);   // returns opaque handle
