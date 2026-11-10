@@ -13,7 +13,7 @@ UI layer extracted from Game. All layout lives in `cpp/UI.h` Layout struct, all 
 - `Layout` can be supplied by a DSi/3DS port and reuse the same drawing code without changes.
 
 ## UI Layout — Fractions Verified vs Real Game
-| Element | Real Fraction (1920x919) | Port Fraction (900x600) | Status |
+| Element | Real Fraction (1920x919) | Port Fraction (1280x720) | Status |
 |---|---|---|---|
 | Banner Y centre | 0.0968 | 0.097 | ✅ |
 | Cookie count Y centre | 0.1393 | 0.141 | ✅ |
@@ -22,7 +22,7 @@ UI layer extracted from Game. All layout lives in `cpp/UI.h` Layout struct, all 
 | Store panel width | 0.1583 | 0.158 | ✅ |
 | Left panel width | 0.30 | 0.30 | ✅ |
 
-## UI Features (matching real v2.058)
+## UI Features (matching real v2.058 / Image 2)
 - **Left panel**: Rounded banner with Kavoon heading (bakery name), "N cookies" large (PT Sans), "per second: X" small (PT Sans), big cookie (#bigCookie) centered with soft glow, clickable
 - **Middle panel**: Game world view between cookie panel and store panel — cookie strip with unlocked building sprites running horizontally near the top, green grass field beneath
 - **Top menu bar**: Wooden plank strips per button (no continuous background). Options+Stats stacked top-left column, Info+Legacy stacked top-right column, centered news ticker text between them
@@ -33,13 +33,14 @@ UI layer extracted from Game. All layout lives in `cpp/UI.h` Layout struct, all 
 ## Rendering — Verified Clean
 - `cmake --build build -j` (exit 0)
 - `timeout 3 ./build/cookie_clicker` (exit 124, expected from timeout)
-- All 8 textures load with no magenta fallback: `bgStripes.png`, `vignette.png`, `glow.png`, `perfectCookie.png`, `smallCookies.png`, `panelHorizontal.png`, `panelVertical.png`, `storeTile.png`
+- All 12 textures load with no magenta fallback: `bgStripes.png`, `vignette.png`, `glow.png`, `perfectCookie.png`, `smallCookies.png`, `panelHorizontal.png`, `panelVertical.png`, `storeTile.png`, `cursor.png`, `grandma.png`, `farm.png`, `mine.png`, `factory.png`, `bank.png`
 - No Tahoma references in source (verified with `grep -rl "[Tt]ahoma" cpp/ || echo "SOURCE CLEAN"`)
 - Build warning-clean
 
 ## File Changes Summary
-- `cpp/UI.h` — Layout struct with all fractions, scaled base sizes, font enums (Default=Kavoon, Body=PT Sans)
-- `cpp/UI.cpp` — draw() with background layers, banner, count/CPS, top menu bar, store column with `storeW/304` scaling
+- `cpp/UI.h` — Layout struct with all fractions, scaled base sizes, font enums (Default=Kavoon, Body=PT Sans); middle panel, top bar corner buttons, store panel sections
+- `cpp/UI.cpp` — draw() with background layers, banner, count/CPS, middle panel cookie strip + grass, top menu bar corner buttons + centered ticker, store column with `storeW/304` scaling, upgrade icons, Buy/Sell toggle, "per second: X" text
+- `cpp/main.cpp` — window 1280x720 (16:9), resizable, OpenGL
 - `cpp/EmbeddedAssets.h/cpp` — 26 embedded assets: 18 building icons + perfectCookie + cursor + farm/mine/factory/bank/wizardtower/shipment/alchemylab/portal/timemachine/antimattercondenser/prism/chancemaker/fractalEngine/javascriptconsole/idleverse + `bgStripes.png`/`vignette.png`/`glow.png` + `Kavoon-Regular.ttf` + `PTSans-*.ttf`; `bgBlue.png` dropped
 - `cpp/Render.h/cpp` — `drawTexture` optional UV params; `drawTextureTiled` one-axis tiling; glyph cache cleared on face size change
 - `cpp/Game.cpp` — Permanent unlock: `cookiesEarned >= basePrice` → `b->locked = false`; cookie wobble damping threshold
@@ -55,6 +56,7 @@ UI layer extracted from Game. All layout lives in `cpp/UI.h` Layout struct, all 
 - `cpp/Shimmer.cpp`, `Particle.cpp` — basic structs only
 - `cpp/Building.cpp` — `modifyBuildingPrice` hook not implemented
 - Wrinkler simulation beyond `cpsSucked`; Buff behavior
+- Floating cookie particles around big cookie
 
 ## Build & Test Commands
 ```

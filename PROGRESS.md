@@ -1,18 +1,23 @@
 # Progress Log — Cookie Clicker C++ Port
 
-## Session Summary: UI Layer Extraction & Layout Polish
+## Session Summary: UI Layer Extraction & Layout Polish (Images 1 → 2)
 
 ### Completed
 - **Background replacement**: `bgBlue.png` dropped; three-layer tiled background using `bgStripes.png` (vertical timeline), `vignette.png` (radial gradient), `glow.png` (soft cookie glow)
 - **Font overhaul**: All Tahoma references removed from `cpp/`; Kavoon for headings, PT Sans for body text embedded as `Kavoon-Regular.ttf` + `PTSans-*.ttf`
-- **Layout struct in UI.h fully rewritten**: All positions/sizes measured from `real_game.png` (1920x919) and scaled to 900x600 port. Fractions verified against real game layout.
+- **Layout struct in UI.h fully rewritten**: All positions/sizes measured from `real_game.png` (1920x919) and scaled to 1280x720 port. Fractions verified against real game layout.
 - **UI.cpp draw() overhauled**: Proper panel layout, text rendering, store column with scaled content (by `storeW/304`), rounded banner, PT Sans body text
 - **Store column**: Width fraction `0.158f` matches real game (~16% of window). Content scaled proportionally. Locked items show `"???"` in dark silhouette. No row separation/frames.
-- **Top menu bar**: Options/Stats/Info/Legacy buttons at `y=26`, gap=10, news ticker area between button groups
+- **Top menu bar**: Options+Stats stacked top-left column, Info+Legacy stacked top-right column, centered news ticker between them. Per-button wood plank strips, no continuous background strip.
+- **Middle panel (new)**: Game world view between cookie panel and store panel — cookie strip with unlocked building sprites running horizontally near the top, green grass field beneath
+- **Store upgrade row**: Shows building icons per slot instead of empty rects; first unlocked building's slot highlighted gold
+- **Buy/Sell toggle**: Separate "Buy" and "Sell" buttons with bulk labels "1 / 10 / 100"
+- **CPS text**: Changed to `"per second: X"` format
 - **Cookie wobble**: Settled with spring damping threshold (`|target-size - current-size| < 0.001` and `|velocity| < 0.001` → snap to target and zero velocity)
+- **Window size**: 900x600 (3:2) → 1280x720 (16:9) to match Image 2 aspect ratio
 - **Build**: `cmake --build build -j` succeeds; `timeout 3 ./build/cookie_clicker` exits 124 (expected)
 
-### Layout Fractions Verified vs Real Game (1920x919 → 900x600)
+### Layout Fractions Verified vs Real Game (1920x919 → 1280x720)
 | Element | Real Fraction | Port Fraction | Status |
 |---|---|---|---|
 | Banner Y centre | 0.0968 | 0.097 | ✅ |
@@ -38,5 +43,10 @@
 - `cpp/Types.h` — Type definitions
 
 ### Next Steps
-- Run build verification and commit changes
-- Update HANDOFF.md with final state
+- **Particle system**: Floating cookie particles around big cookie (stubbed `particlesUpdate()`)
+- **Cookie click sound/audio feedback**
+- **Unlock progression**: Buildings unlock as `cookiesEarned >= basePrice` already implemented; verify all 18 buildings unlock correctly
+- **Save/Load**: Verify exact JS-compatible pipe/semicolon/base64/`!END!` format round-trips
+- **Store row click-to-buy**: Verify hit-testing and purchase flow works end-to-end
+- **Minigames**: Garden → Grimoire → Pantheon → Dungeons (after core loop stable)
+- **Commit & push**: `git add` only changed files, commit with terse message, push
