@@ -295,7 +295,8 @@ std::string SaveLoad::writeSave(Game& game, i32 /*type*/) {
         s << b->bought << ',';
         s << std::floor(b->totalCookies) << ',';
         s << b->level << ',';
-        s << ','; // minigame save (placeholder)
+        if (b->minigameLoaded && b->minigame) s << b->minigame->save();
+        s << ','; // minigame save (between level and muted)
         s << (b->muted ? '1' : '0');
         s << ';';
     }
@@ -559,7 +560,10 @@ bool SaveLoad::loadSave(Game& game, const std::string& raw) {
             b->bought = static_cast<i32>(bgetf(bf, 1));
             b->totalCookies = bgetf(bf, 2);
             b->level = static_cast<i32>(bgetf(bf, 3));
-            // bf[4]: minigame save (minigames are stubbed - ignored)
+            // bf[4]: minigame save
+            if (bf.size() > 4 && !bf[4].empty() && b->minigameLoaded && b->minigame) {
+                b->minigame->load(bf[4]);
+            }
             if (bf.size() > 5) b->muted = static_cast<i32>(bgetf(bf, 5, 0.0)) != 0;
             buildingsOwned += b->amount;
         }

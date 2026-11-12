@@ -228,6 +228,12 @@ public:
     void unlock(const std::string& name);
     Building* getBuilding(const std::string& name);
 
+    // --- minigame accessors (core logic; UI deferred) -----------------------
+    f64 minigameCookieBonus() const;   // combined CpS mult from all minigames
+    f64 minigameClickBonus() const;    // combined click mult from all minigames
+    Minigame* getMinigame(i32 buildingId);
+    bool hasMinigame(i32 buildingId) const;
+
     // --- save / load (exact JS-compatible format) --------------------------
     std::string writeSave(i32 type = 0);   // type: 0=store, 1=string, 2=uncompressed, 3=commented
     bool loadSave(const std::string& data);

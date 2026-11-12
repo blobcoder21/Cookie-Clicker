@@ -1,6 +1,10 @@
 #include "Game.h"
 #include "SaveLoad.h"
 #include "Building.h"
+#include "Garden.h"
+#include "Grimoire.h"
+#include "Pantheon.h"
+#include "Dungeons.h"
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -240,6 +244,33 @@ void Game::load() {
     addUpgrade("Bingo center/Research facility", "Grandmas are 4x more efficient.", 1000000.0, grandma, 1);
     addUpgrade("Ritual rolling pins", "Grandmas are 2x more efficient.", 50000000000.0, grandma, 2);
 
+    // --- Minigames (core logic; UI deferred) ---
+    // Attach a minigame to each building that supports one.
+    auto attachMinigame = [this](i32 buildingId, std::unique_ptr<Minigame> m) {
+        m->init();
+        if (buildingId >= 0 && buildingId < objectsN) {
+            Building* b = objectsById[buildingId];
+            b->minigame = m.get();
+            b->minigameLoaded = true;
+            b->minigameName = m->name;
+            b->onMinigame = true;
+        }
+        minigames[buildingId] = std::move(m);
+    };
+
+    // Farm (id=2) -> Garden
+    attachMinigame(2, std::make_unique<Garden>(objectsById[2]));
+    // Temple (id=6) -> Pantheon
+    attachMinigame(6, std::make_unique<Pantheon>(objectsById[6]));
+    // Wizard tower (id=7) -> Grimoire
+    attachMinigame(7, std::make_unique<Grimoire>(objectsById[7]));
+    // Dungeons (standalone, keyed by -1)
+    {
+        auto d = std::make_unique<Dungeons>(nullptr);
+        d->init();
+        minigames[-1] = std::move(d);
+    }
+
     // --- wrinklers: 12 fixed slots (JS Game.wrinklers, getWrinklersMax base 10) ---
     wrinklers.reserve(12);
     for (i32 i = 0; i < 12; ++i) {
@@ -351,8 +382,12 @@ void Game::logic(f64 dt) {
     // minigames
     for (auto& b : objects) {
         if (b->minigameLoaded && b->minigame) {
-            // b->minigame->logic(); // stubbed
+            b->minigame->eachFrame();
         }
+    }
+    // standalone minigames (e.g. Dungeons not tied to a building)
+    if (auto it = minigames.find(-1); it != minigames.end() && it->second) {
+        it->second->eachFrame();
     }
 
     // wrinklers
@@ -495,6 +530,7 @@ f64 Game::mouseCps() {
         (void)bf;
     }
 
+    out *= minigameClickBonus();
     return out;
 }
 
@@ -724,6 +760,9 @@ void Game::calculateGains() {
     globalCpsMult = mult;
     cookiesPs *= globalCpsMult;
 
+    // --- minigame CPS bonus ---
+    cookiesPs *= minigameCookieBonus();
+
     computedMouseCps = mouseCps();
 }
 
@@ -748,6 +787,32 @@ void Game::unlock(const std::string& name) {
 Building* Game::getBuilding(const std::string& name) {
     for (auto& b : objects) if (b && b->name == name) return b.get();
     return nullptr;
+}
+
+f64 Game::minigameCookieBonus() const {
+    f64 mult = 1.0;
+    for (auto& kv : minigames) {
+        if (kv.second) mult *= kv.second->cookieBonus();
+    }
+    return mult;
+}
+
+f64 Game::minigameClickBonus() const {
+    f64 mult = 1.0;
+    for (auto& kv : minigames) {
+        if (kv.second) mult *= kv.second->clickBonus();
+    }
+    return mult;
+}
+
+Minigame* Game::getMinigame(i32 buildingId) {
+    auto it = minigames.find(buildingId);
+    return (it != minigames.end()) ? it->second.get() : nullptr;
+}
+
+bool Game::hasMinigame(i32 buildingId) const {
+    auto it = minigames.find(buildingId);
+    return (it != minigames.end() && it->second != nullptr);
 }
 
 std::string Game::getBakeryName() const {

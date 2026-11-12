@@ -43,15 +43,16 @@
 - `cpp/Types.h` — Type definitions
 
 ### Porting target (current direction)
-- **Phase 1 — Core economy (buildings → upgrades → sounds → clean UI UX later)**
+- **Phase 1 — Core economy (buildings → upgrades → minigames → sounds → clean UI UX later)**
   - **Buildings**: all 18 ported in `Game.cpp::load()` ✓ (Cursor … Idleverse). Unlock via `cookiesEarned >= basePrice` implemented.
-  - **Upgrades (now)**: populate `Game::load()` upgrade data, add `Game::buyUpgrade()`, wire tiered upgrades into `GetTieredCpsMult()`, so `has()` checks in `calculateGains()`/`mouseCps()`/CPS funcs actually take effect. UI for buying upgrades deferred (clean UI UX later).
-  - **Sounds (next)**: `Audio.cpp` is a no-op stub; SDL2_mixer is not installed on this box, so audio stays stubbed until `libsdl2-mixer-dev` is available.
-  - **Clean UI UX**: deferred until core economy (buildings + upgrades + save/load round-trip) is stable.
-- **Phase 2 (after core stable)**: Save/Load round-trip verification, store row click-to-buy, particles, minigames (Garden → Grimoire → Pantheon → Dungeons).
+  - **Upgrades**: starter upgrade data populated in `Game::load()`, `Game::buyUpgrade()`, `GetTieredCpsMult()` wired to bought tiered upgrades ✓
+  - **Minigames (now)**: Garden (Farm plot grid, plant growth/mutations/harvest), Grimoire (Wizard tower mana/spells/cooldowns), Pantheon (Temple god slots/buffs/drawbacks), Dungeons (procedural generation via DungeonGen, floor progression, rewards). All core logic only — `draw()` stubbed, no UI dependencies. Wired into `Game::logic()` (`eachFrame()`), `calculateGains()` (CPS bonus), `mouseCps()` (click bonus), and SaveLoad (per-building minigame save strings).
+  - **Sounds (next)**: `Audio.cpp` is a no-op stub; SDL2_mixer not installed on this box.
+  - **Clean UI UX**: deferred until core economy (buildings + upgrades + minigames + save/load round-trip) is stable.
+- **Phase 2 (after core stable)**: Save/Load round-trip verification, store row click-to-buy, particles, minigame UI.
 
 ### Active
-- Upgrades core (populate upgrade data + buyUpgrade + tiered CPS mult)
+- Minigame core logic (Garden, Grimoire, Pantheon, Dungeons + Game wiring + SaveLoad)
 
 ### Blocked
 - Sounds: SDL2_mixer not installed on this box (`Audio.cpp` remains no-op stub)

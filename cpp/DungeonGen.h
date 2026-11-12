@@ -6,4 +6,5 @@
 
 namespace DungeonGen {
     std::string generateDungeonName();
+    std::string generateFloorName(i32 floor);
 }
