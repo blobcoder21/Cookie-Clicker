@@ -219,6 +219,7 @@ public:
     f64 GetHeavenlyMultiplier();                               // prestige mult
     void buyBuilding(Building* b, i32 amount = 1);              // purchase building
     void sellBuilding(Building* b, i32 amount = 1);             // sell building
+    bool buyUpgrade(const std::string& name);                   // purchase upgrade (core; UI deferred)
 
     // --- building/upgrade helpers ------------------------------------------
     bool has(const std::string& name) const;           // Game.Has (upgrade)

@@ -42,11 +42,16 @@
 - `cpp/Game.cpp` — Permanent building unlock via `cookiesEarned >= basePrice`; cookie wobble clamping
 - `cpp/Types.h` — Type definitions
 
-### Next Steps
-- **Particle system**: Floating cookie particles around big cookie (stubbed `particlesUpdate()`)
-- **Cookie click sound/audio feedback**
-- **Unlock progression**: Buildings unlock as `cookiesEarned >= basePrice` already implemented; verify all 18 buildings unlock correctly
-- **Save/Load**: Verify exact JS-compatible pipe/semicolon/base64/`!END!` format round-trips
-- **Store row click-to-buy**: Verify hit-testing and purchase flow works end-to-end
-- **Minigames**: Garden → Grimoire → Pantheon → Dungeons (after core loop stable)
-- **Commit & push**: `git add` only changed files, commit with terse message, push
+### Porting target (current direction)
+- **Phase 1 — Core economy (buildings → upgrades → sounds → clean UI UX later)**
+  - **Buildings**: all 18 ported in `Game.cpp::load()` ✓ (Cursor … Idleverse). Unlock via `cookiesEarned >= basePrice` implemented.
+  - **Upgrades (now)**: populate `Game::load()` upgrade data, add `Game::buyUpgrade()`, wire tiered upgrades into `GetTieredCpsMult()`, so `has()` checks in `calculateGains()`/`mouseCps()`/CPS funcs actually take effect. UI for buying upgrades deferred (clean UI UX later).
+  - **Sounds (next)**: `Audio.cpp` is a no-op stub; SDL2_mixer is not installed on this box, so audio stays stubbed until `libsdl2-mixer-dev` is available.
+  - **Clean UI UX**: deferred until core economy (buildings + upgrades + save/load round-trip) is stable.
+- **Phase 2 (after core stable)**: Save/Load round-trip verification, store row click-to-buy, particles, minigames (Garden → Grimoire → Pantheon → Dungeons).
+
+### Active
+- Upgrades core (populate upgrade data + buyUpgrade + tiered CPS mult)
+
+### Blocked
+- Sounds: SDL2_mixer not installed on this box (`Audio.cpp` remains no-op stub)

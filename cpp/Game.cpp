@@ -208,6 +208,38 @@ void Game::load() {
     // Cursor unlocked by default (matches JS Game.Object: this.locked=false for Cursor)
     objects[0]->locked = false;
 
+    // --- Upgrades (starter set; core economy, UI for buying deferred) ---
+    // All starter upgrades are unlocked so they become buyable once affordable.
+    // Their effects are applied via the existing `has()` checks in
+    // calculateGains()/mouseCps()/building CPS funcs once bought.
+    auto addUpgrade = [this](std::string name, std::string desc, f64 price,
+                             Building* tieredBuilding = nullptr, i32 tier = 0) {
+        auto u = std::make_unique<Upgrade>(std::move(name), std::move(desc), price, "");
+        u->id = static_cast<i32>(upgrades.size());
+        u->unlocked = true; // starter upgrades are unlocked from the start
+        u->tieredBuilding = tieredBuilding;
+        u->tier = tier;
+        if (tieredBuilding) tieredBuilding->tieredUpgrades.push_back(u.get());
+        upgradesById.push_back(u.get());
+        upgrades.push_back(std::move(u));
+    };
+
+    Building* cursor = getBuilding("Cursor");
+    Building* grandma = getBuilding("Grandma");
+
+    // Click upgrades (affect clickUpgrades in mouseCps())
+    addUpgrade("Reinforced index finger", "Clicks are +1 more powerful.", 15.0);
+    addUpgrade("Carpal tunnel prevention cream", "Clicks are +1 more powerful.", 100.0);
+    addUpgrade("Ambidextrous", "Clicks are +1 more powerful.", 500.0);
+
+    // Finger upgrades (affect Cursor CPS + mouseCps add)
+    addUpgrade("Thousand fingers", "Autoclicker +0.1 cookies per click.", 10000.0, cursor, 1);
+    addUpgrade("Million fingers", "Autoclicker +0.5 cookies per click.", 100000000.0, cursor, 2);
+
+    // Grandma multipliers
+    addUpgrade("Bingo center/Research facility", "Grandmas are 4x more efficient.", 1000000.0, grandma, 1);
+    addUpgrade("Ritual rolling pins", "Grandmas are 2x more efficient.", 50000000000.0, grandma, 2);
+
     // --- wrinklers: 12 fixed slots (JS Game.wrinklers, getWrinklersMax base 10) ---
     wrinklers.reserve(12);
     for (i32 i = 0; i < 12; ++i) {
@@ -528,6 +560,20 @@ void Game::sellBuilding(Building* b, i32 amount) {
     recalculateGains_ = true;
 }
 
+bool Game::buyUpgrade(const std::string& name) {
+    for (auto& u : upgrades) {
+        if (u && u->name == name) {
+            if (!u->canBuy()) return false;   // not unlocked or already bought
+            if (cookies < u->price) return false;
+            spend(u->price);
+            u->bought = true;
+            recalculateGains_ = true;
+            return true;
+        }
+    }
+    return false;
+}
+
 void Game::calculateGains() {
     recalculateGains_ = false;
 
@@ -718,8 +764,16 @@ f64 Game::eff(const std::string& name, f64 def) {
     return (it != effs_.end()) ? it->second : def;
 }
 
-f64 Game::GetTieredCpsMult(Building* /*me*/) {
-    return 1.0; // tiered upgrades not implemented yet
+f64 Game::GetTieredCpsMult(Building* me) {
+    f64 mult = 1.0;
+    if (!me) return mult;
+    for (auto* u : me->tieredUpgrades) {
+        if (u && u->bought) {
+            // each bought tiered upgrade multiplies this building's CPS
+            mult *= 1.0 + static_cast<f64>(u->tier) * 0.05;
+        }
+    }
+    return mult;
 }
 
 f64 Game::magicCpS(const std::string& /*name*/) {
