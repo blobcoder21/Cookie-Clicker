@@ -91,6 +91,9 @@ int main(int argc, char** argv) {
                 break;
             case GameAction::Type::None:
                 break;
+            case GameAction::Type::ClickFortune:
+                game.clickTickerFortune();
+                break;
             }
         }
 

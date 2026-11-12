@@ -20,7 +20,7 @@
 // ---------------------------------------------------------------------------
 
 struct GameAction {
-    enum class Type : i32 { None, ClickCookie, BuyBuilding };
+    enum class Type : i32 { None, ClickCookie, BuyBuilding, ClickFortune };
     Type type = Type::None;
     i32 buildingIndex = -1; // index into Game::objects (BuyBuilding only)
 };
@@ -236,6 +236,9 @@ private:
 
     // active toasts (skeleton)
     std::vector<Toast> toasts;
+
+    // cached ticker rect (set during draw, checked during on_pointer)
+    i32 tickerRectX = 0, tickerRectY = 0, tickerRectW = 0, tickerRectH = 0;
 
     i32 loadIcon(const std::string& iconPath);
 };

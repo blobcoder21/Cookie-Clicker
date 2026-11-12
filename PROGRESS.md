@@ -43,17 +43,24 @@
 - `cpp/Types.h` — Type definitions
 
 ### Porting target (current direction)
-- **Phase 1 — Core economy (buildings → upgrades → minigames → settings → sounds → clean UI UX later)**
+- **Phase 1 — Core economy (buildings → upgrades → minigames → settings → news ticker/fortune → sounds → clean UI UX later)**
   - **Buildings**: all 18 ported in `Game.cpp::load()` ✓ (Cursor … Idleverse). Unlock via `cookiesEarned >= basePrice` implemented.
   - **Upgrades**: starter upgrade data populated in `Game::load()`, `Game::buyUpgrade()`, `GetTieredCpsMult()` wired to bought tiered upgrades ✓
-  - **Minigames**: Garden (Farm plot grid, plant growth/mutations/harvest), Grimoire (Wizard tower mana/spells/cooldowns), Pantheon (Temple god slots/buffs/drawbacks), Dungeons (procedural generation via DungeonGen, floor progression, rewards). All core logic only — `draw()` stubbed, no UI dependencies. Wired into `Game::logic()` (`eachFrame()`), `calculateGains()` (CPS bonus), `mouseCps()` (click bonus), and SaveLoad (per-building minigame save strings). ✓
-  - **Settings / prefs (now)**: All 21 `Prefs` flags are decoded from savegame bitstring (SaveLoad.cpp section 3) ✓. Runtime accessors added: `getPref()`, `setPref()`, `togglePref()`. Behavioral effects wired: `wobbly` gates cookie wobble, `particles` gates `particlesUpdate()`, `autosave` gates autosave, `cookiesound` is a runtime flag ready to gate audio when wired.
+  - **Minigames**: Garden, Grimoire, Pantheon, Dungeons — core logic only, wired into Game logic + SaveLoad ✓
+  - **Settings / prefs**: All 21 `Prefs` flags decoded from savegame bitstring ✓. Runtime accessors: `getPref()`, `setPref()`, `togglePref()`. Behavioral effects: `wobbly` gates cookie wobble, `particles` gates `particlesUpdate()`, `autosave` gates autosave.
+  - **News ticker + Fortune cookies (now)**:
+    - News ticker cycles through building/money/CpS-based messages every ~15 seconds (`Game::updateSpecial()` → `advanceTicker()`).
+    - Heavenly upgrade `Fortune cookies` (ID 643) added with prerequisite `Distilled essence of redoubled luck`, cost 77.778B heavenly chips. Purchased via `buyHeavenlyUpgrade()` (spends heavenly chips).
+    - Once `Fortune cookies` is bought, ticker messages have 2% chance (4% with `O Fortuna` achievement) of becoming clickable fortunes during natural ticker cycling only.
+    - Clicking a fortune (`Game::clickTickerFortune()`) grants a cookie bonus (5 minutes of CpS).
+    - Heavenly upgrade ownership persisted via upgrade bitstring (SaveLoad section 6) — `has("Fortune cookies")` works after load.
+    - UI: ticker displays from `Game::tickerMessage()`, gold color for fortunes, clickable via `GameAction::Type::ClickFortune`.
   - **Sounds (next)**: `Audio.cpp` is a no-op stub; SDL2_mixer not installed on this box.
-  - **Clean UI UX**: deferred until core economy (buildings + upgrades + minigames + settings + save/load round-trip) is stable.
+  - **Clean UI UX**: deferred until core economy is stable.
 - **Phase 2 (after core stable)**: Save/Load round-trip verification, store row click-to-buy, particles, minigame UI.
 
 ### Active
-- Settings / prefs runtime flags (getPref/setPref/togglePref + behavioral effects)
+- News ticker + Fortune cookies core logic
 
 ### Blocked
 - Sounds: SDL2_mixer not installed on this box (`Audio.cpp` remains no-op stub)

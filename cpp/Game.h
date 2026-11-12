@@ -253,6 +253,16 @@ public:
     i32 flashBuildingIndexValue() const { return flashBuildingIndex; }
     i32 flashFramesValue() const { return flashFrames; }
 
+    // --- news ticker --------------------------------------------------------
+    std::string tickerMessage() const;        // current ticker text for UI
+    bool tickerIsFortune() const;             // whether current message is a clickable fortune
+    void clickTickerFortune();                // UI calls this when clicking a fortune
+    i32 fortunesClicked() const { return fortunesClicked_; }
+
+    // --- heavenly upgrades --------------------------------------------------
+    bool buyHeavenlyUpgrade(const std::string& name);   // purchase with heavenly chips
+    bool hasFortuneCookies() const;             // whether Fortune cookies (ID 643) is bought
+
 private:
     bool recalculateGains_ = true;
     std::map<std::string, f64> effs_;   // Game.effs backing store
@@ -276,12 +286,24 @@ private:
     f64 milkH = 0.0;
     f64 milkHd = 0.0;
 
+    // news ticker state (core logic, no UI dependencies)
+    std::vector<std::string> tickerMessages_;   // pool of generated messages
+    i32 tickerIndex_ = 0;                       // current message in pool
+    f64 tickerTimer_ = 0.0;                     // seconds until next message
+    bool tickerIsFortune_ = false;              // current message is a clickable fortune
+    std::string tickerFortuneMsg_;              // fortune message override
+    i32 fortunesClicked_ = 0;                   // total fortunes clicked
+    f64 tickerInterval_ = 15.0;                 // seconds between ticker messages
+
     void updateSpecial();
     void updateGrandmapocalypse();
     void particlesUpdate();
     void textParticlesUpdate();
     void updateShimmers();
     void updateBuffs();
+
+    // news ticker internals
+    void advanceTicker();
 };
 
 extern Game* g_game; // accessor, like the global `Game` in JS

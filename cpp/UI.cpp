@@ -328,16 +328,25 @@ void UI::draw() {
         f32 rightEdge = buttonRightEdge(layout_.btnInfoX, layout_.btnInfoW);
         f32 tw = rightEdge - leftEdge;
         if (tw > 0) {
-            // Center the ticker text horizontally.
-            std::string tickerText = "Your family agrees to try some of your cookies.";
+            // Get current ticker message from Game core.
+            std::string tickerText = game_.tickerMessage();
+            bool isFortune = game_.tickerIsFortune();
+            u32 tickerColor = isFortune ? 0xFFD700FF : layout_.newsTickerColor; // gold for fortunes
             f32 twText = render_.measureText(tickerText.c_str(), layout_.newsTickerScale, body);
             f32 tx = leftEdge + (tw - twText) / 2.0f;
             // news ticker: plain dark strip behind the scrolling text
             render_.drawRect(leftEdge, static_cast<f32>(layout_.topBarY + 10),
                              tw, static_cast<f32>(layout_.topBarH - 20), 0x00000080);
             render_.drawText(tx, static_cast<f32>(layout_.newsTickerY),
-                             tickerText.c_str(), layout_.newsTickerColor,
+                             tickerText.c_str(), tickerColor,
                              layout_.newsTickerScale, body);
+            // Cache ticker rect for hit-testing (fortune clicks).
+            tickerRectX = static_cast<i32>(leftEdge);
+            tickerRectY = static_cast<i32>(layout_.topBarY + 10);
+            tickerRectW = static_cast<i32>(tw);
+            tickerRectH = static_cast<i32>(layout_.topBarH - 20);
+        } else {
+            tickerRectW = 0;
         }
     }
 
@@ -535,6 +544,13 @@ GameAction UI::on_pointer(i32 x, i32 y) {
         if (idx >= 0 && idx < static_cast<i32>(game_.objects.size())) {
             return GameAction{GameAction::Type::BuyBuilding, idx};
         }
+    }
+    // Ticker fortune click: only when ticker area is hit AND current message is a fortune.
+    if (tickerRectW > 0 &&
+        x >= tickerRectX && x < tickerRectX + tickerRectW &&
+        y >= tickerRectY && y < tickerRectY + tickerRectH &&
+        game_.tickerIsFortune()) {
+        return GameAction{GameAction::Type::ClickFortune, -1};
     }
     return GameAction{GameAction::Type::None, -1};
 }

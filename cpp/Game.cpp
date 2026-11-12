@@ -244,6 +244,13 @@ void Game::load() {
     addUpgrade("Bingo center/Research facility", "Grandmas are 4x more efficient.", 1000000.0, grandma, 1);
     addUpgrade("Ritual rolling pins", "Grandmas are 2x more efficient.", 50000000000.0, grandma, 2);
 
+    // --- Heavenly upgrades (purchased with heavenly chips, not cookies) ---
+    // These are persisted via the upgrade bitstring (unlocked/bought) in SaveLoad.
+    addUpgrade("Distilled essence of redoubled luck", "Fortune cookies are 2x more likely to appear.",
+               77778000000.0, nullptr, 0);
+    addUpgrade("Fortune cookies", "News ticker messages have a chance of becoming clickable fortunes.",
+               77778000000.0, nullptr, 0);
+
     // --- Minigames (core logic; UI deferred) ---
     // Attach a minigame to each building that supports one.
     auto attachMinigame = [this](i32 buildingId, std::unique_ptr<Minigame> m) {
@@ -270,6 +277,14 @@ void Game::load() {
         d->init();
         minigames[-1] = std::move(d);
     }
+
+    // --- News ticker message pool ---
+    // Messages are generated dynamically from game state (buildings, cookies, CpS).
+    // The pool is refreshed each time the ticker cycles.
+    tickerMessages_.clear();
+    tickerIndex_ = 0;
+    tickerTimer_ = tickerInterval_;
+    tickerIsFortune_ = false;
 
     // --- wrinklers: 12 fixed slots (JS Game.wrinklers, getWrinklersMax base 10) ---
     wrinklers.reserve(12);
@@ -880,7 +895,112 @@ bool Game::togglePref(const std::string& name) {
     return !cur;
 }
 
-void Game::updateSpecial() { /* TODO: special menu / news ticker */ }
+void Game::updateSpecial() {
+    // --- News ticker ---
+    // Advance the ticker timer; when it expires, cycle to the next message.
+    // Fortune checks happen only during natural ticker cycling (here), never
+    // on manual ticker clicks.
+    tickerTimer_ -= 1.0 / static_cast<f64>(fps);
+    if (tickerTimer_ <= 0.0) {
+        tickerTimer_ = tickerInterval_;
+        advanceTicker();
+    }
+}
+
+void Game::advanceTicker() {
+    // Build a fresh pool of ticker messages from current game state.
+    tickerMessages_.clear();
+
+    // --- Building-based messages ---
+    for (auto& b : objects) {
+        if (!b || b->amount == 0) continue;
+        std::string msg = "Your " + b->plural + " have baked " +
+                          std::to_string(static_cast<i64>(b->totalCookies)) + " cookies.";
+        tickerMessages_.push_back(msg);
+    }
+
+    // --- Money-based messages ---
+    tickerMessages_.push_back("You have " +
+                              std::to_string(static_cast<i64>(cookies)) + " cookies in the bank.");
+    tickerMessages_.push_back("You have earned " +
+                              std::to_string(static_cast<i64>(cookiesEarned)) + " cookies in total.");
+
+    // --- Cookies-produced (CpS) messages ---
+    tickerMessages_.push_back("You're producing " +
+                              std::to_string(static_cast<i64>(cookiesPs)) + " cookies per second.");
+    tickerMessages_.push_back("Your bakery is making " +
+                              std::to_string(static_cast<i64>(cookiesPs)) + " cookies every second.");
+
+    // --- Generic messages ---
+    tickerMessages_.push_back("Your family agrees to try some of your cookies.");
+    tickerMessages_.push_back("The cookies smell delicious.");
+    tickerMessages_.push_back("More cookies! Always more cookies.");
+
+    if (tickerMessages_.empty()) {
+        tickerMessages_.push_back("Welcome to your cookie bakery.");
+    }
+
+    // Cycle to next message in pool.
+    tickerIndex_ = (tickerIndex_ + 1) % static_cast<i32>(tickerMessages_.size());
+    std::string msg = tickerMessages_[tickerIndex_];
+
+    // --- Fortune check (natural cycling only) ---
+    tickerIsFortune_ = false;
+    if (hasFortuneCookies()) {
+        f64 chance = 0.02; // 2% base
+        if (hasAchiev("O Fortuna")) chance = 0.04; // 4% with O Fortuna achievement
+        // Pseudo-random check based on frame/time for determinism
+        f64 roll = static_cast<f64>((static_cast<i64>(now_ms()) + tickerIndex_) % 10000) / 10000.0;
+        if (roll < chance) {
+            tickerIsFortune_ = true;
+            msg = "FORTUNE: A clickable fortune cookie has appeared!";
+        }
+    }
+
+    // Store the message for UI retrieval (we keep it in tickerMessages_[tickerIndex_]
+    // but need a separate slot for the fortune variant). Store fortune override.
+    tickerFortuneMsg_ = msg;
+}
+
+std::string Game::tickerMessage() const {
+    if (tickerIsFortune_) return tickerFortuneMsg_;
+    if (tickerIndex_ >= 0 && tickerIndex_ < static_cast<i32>(tickerMessages_.size()))
+        return tickerMessages_[tickerIndex_];
+    return "";
+}
+
+bool Game::tickerIsFortune() const { return tickerIsFortune_; }
+
+void Game::clickTickerFortune() {
+    if (!tickerIsFortune_) return;
+    ++fortunesClicked_;
+    tickerIsFortune_ = false;
+    // Fortune bonus: grant cookies based on CpS (like a "fortune" cookie reward)
+    f64 reward = cookiesPs * 60.0 * 5.0; // 5 minutes of CpS
+    earn(reward);
+    handmadeCookies += reward;
+    cookieClicks++;
+}
+
+bool Game::buyHeavenlyUpgrade(const std::string& name) {
+    for (auto& u : upgrades) {
+        if (u && u->name == name) {
+            if (!u->canBuy()) return false;   // not unlocked or already bought
+            if (heavenlyChips < u->price) return false;
+            heavenlyChips -= u->price;
+            heavenlyChipsSpent += u->price;
+            u->bought = true;
+            recalculateGains_ = true;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool Game::hasFortuneCookies() const {
+    return has("Fortune cookies");
+}
+
 void Game::updateGrandmapocalypse() { /* TODO */ }
 void Game::particlesUpdate() { /* TODO */ }
 void Game::textParticlesUpdate() { /* TODO */ }
