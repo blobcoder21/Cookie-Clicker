@@ -331,21 +331,23 @@ void Game::logic(f64 dt) {
     calculateGains();
     updateSpecial();
     updateGrandmapocalypse();
-    particlesUpdate();
+    if (prefs.particles) particlesUpdate();
 
     // big cookie animation — wobble between 90% and 120% of size
-    if (bigCookieState == 1) bigCookieSizeT = 0.9;
-    else if (bigCookieState == 2) bigCookieSizeT = 1.2;
-    else bigCookieSizeT = 1.0;
-    bigCookieSizeD += (bigCookieSizeT - bigCookieSize) * 0.75;
-    bigCookieSizeD *= 0.75;
-    bigCookieSize += bigCookieSizeD;
-    // Snap to rest when the spring has settled, so the cookie doesn't keep
-    // micro-wobbling forever after a click.
-    if (std::fabs(bigCookieSizeT - bigCookieSize) < 0.001 &&
-        std::fabs(bigCookieSizeD) < 0.001) {
-        bigCookieSize = bigCookieSizeT;
-        bigCookieSizeD = 0.0;
+    if (prefs.wobbly) {
+        if (bigCookieState == 1) bigCookieSizeT = 0.9;
+        else if (bigCookieState == 2) bigCookieSizeT = 1.2;
+        else bigCookieSizeT = 1.0;
+        bigCookieSizeD += (bigCookieSizeT - bigCookieSize) * 0.75;
+        bigCookieSizeD *= 0.75;
+        bigCookieSize += bigCookieSizeD;
+        // Snap to rest when the spring has settled, so the cookie doesn't keep
+        // micro-wobbling forever after a click.
+        if (std::fabs(bigCookieSizeT - bigCookieSize) < 0.001 &&
+            std::fabs(bigCookieSizeD) < 0.001) {
+            bigCookieSize = bigCookieSizeT;
+            bigCookieSizeD = 0.0;
+        }
     }
     bigCookieSize = std::max(0.1, bigCookieSize);
 
@@ -437,8 +439,8 @@ void Game::logic(f64 dt) {
         if (handmadeCookies >= 1000000000.0) { /* Win('Clickorama'); Unlock('Adamantium mouse'); */ }
     }
 
-    // autosave every 60 seconds
-    if ((loopT % (fps * 60) == 0 && loopT > fps * 10) || toSave) {
+    // autosave every 60 seconds (respects prefs.autosave)
+    if (prefs.autosave && ((loopT % (fps * 60) == 0 && loopT > fps * 10) || toSave)) {
         toSave = false;
         writeSave();
     }
@@ -545,6 +547,10 @@ void Game::clickCookie(i32 amount) {
     cookieClicks++;
     bigCookieSizeT = 1.2;   // pop to 120% on click
     bigCookieSizeD += 0.3;  // upward velocity for the bounce
+
+    // prefs.cookiesound is a runtime flag (decoded from savegame via getPref()).
+    // It gates Audio::playSound() when audio is wired up; the flag itself is
+    // stored and can be toggled via setPref()/togglePref().
 }
 
 
@@ -817,6 +823,61 @@ bool Game::hasMinigame(i32 buildingId) const {
 
 std::string Game::getBakeryName() const {
     return "Cookie Bakery";
+}
+
+bool Game::getPref(const std::string& name) const {
+    if (name == "particles") return prefs.particles;
+    if (name == "numbers") return prefs.numbers;
+    if (name == "autosave") return prefs.autosave;
+    if (name == "autoupdate") return prefs.autoupdate;
+    if (name == "milk") return prefs.milk;
+    if (name == "fancy") return prefs.fancy;
+    if (name == "warn") return prefs.warn;
+    if (name == "cursors") return prefs.cursors;
+    if (name == "focus") return prefs.focus;
+    if (name == "format") return prefs.format;
+    if (name == "notifs") return prefs.notifs;
+    if (name == "wobbly") return prefs.wobbly;
+    if (name == "monospace") return prefs.monospace;
+    if (name == "filters") return prefs.filters;
+    if (name == "cookiesound") return prefs.cookiesound;
+    if (name == "crates") return prefs.crates;
+    if (name == "showBackupWarning") return prefs.showBackupWarning;
+    if (name == "extraButtons") return prefs.extraButtons;
+    if (name == "askLumps") return prefs.askLumps;
+    if (name == "customGrandmas") return prefs.customGrandmas;
+    if (name == "timeout") return prefs.timeout;
+    return false;
+}
+
+void Game::setPref(const std::string& name, bool value) {
+    if (name == "particles") { prefs.particles = value; return; }
+    if (name == "numbers") { prefs.numbers = value; return; }
+    if (name == "autosave") { prefs.autosave = value; return; }
+    if (name == "autoupdate") { prefs.autoupdate = value; return; }
+    if (name == "milk") { prefs.milk = value; return; }
+    if (name == "fancy") { prefs.fancy = value; return; }
+    if (name == "warn") { prefs.warn = value; return; }
+    if (name == "cursors") { prefs.cursors = value; return; }
+    if (name == "focus") { prefs.focus = value; return; }
+    if (name == "format") { prefs.format = value; return; }
+    if (name == "notifs") { prefs.notifs = value; return; }
+    if (name == "wobbly") { prefs.wobbly = value; return; }
+    if (name == "monospace") { prefs.monospace = value; return; }
+    if (name == "filters") { prefs.filters = value; return; }
+    if (name == "cookiesound") { prefs.cookiesound = value; return; }
+    if (name == "crates") { prefs.crates = value; return; }
+    if (name == "showBackupWarning") { prefs.showBackupWarning = value; return; }
+    if (name == "extraButtons") { prefs.extraButtons = value; return; }
+    if (name == "askLumps") { prefs.askLumps = value; return; }
+    if (name == "customGrandmas") { prefs.customGrandmas = value; return; }
+    if (name == "timeout") { prefs.timeout = value; return; }
+}
+
+bool Game::togglePref(const std::string& name) {
+    bool cur = getPref(name);
+    setPref(name, !cur);
+    return !cur;
 }
 
 void Game::updateSpecial() { /* TODO: special menu / news ticker */ }

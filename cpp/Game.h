@@ -243,6 +243,11 @@ public:
     std::string getBakeryName() const;
     void recalculateGainsFlag() { recalculateGains_ = true; }
 
+    // --- settings / prefs (runtime flags, decoded from savegame) -----------
+    bool getPref(const std::string& name) const;
+    void setPref(const std::string& name, bool value);
+    bool togglePref(const std::string& name);
+
     // --- read-only access for the UI layer (animation / feedback state) ----
     f64 bigCookieSizeValue() const { return bigCookieSize; }
     i32 flashBuildingIndexValue() const { return flashBuildingIndex; }

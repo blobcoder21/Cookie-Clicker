@@ -43,16 +43,17 @@
 - `cpp/Types.h` — Type definitions
 
 ### Porting target (current direction)
-- **Phase 1 — Core economy (buildings → upgrades → minigames → sounds → clean UI UX later)**
+- **Phase 1 — Core economy (buildings → upgrades → minigames → settings → sounds → clean UI UX later)**
   - **Buildings**: all 18 ported in `Game.cpp::load()` ✓ (Cursor … Idleverse). Unlock via `cookiesEarned >= basePrice` implemented.
   - **Upgrades**: starter upgrade data populated in `Game::load()`, `Game::buyUpgrade()`, `GetTieredCpsMult()` wired to bought tiered upgrades ✓
-  - **Minigames (now)**: Garden (Farm plot grid, plant growth/mutations/harvest), Grimoire (Wizard tower mana/spells/cooldowns), Pantheon (Temple god slots/buffs/drawbacks), Dungeons (procedural generation via DungeonGen, floor progression, rewards). All core logic only — `draw()` stubbed, no UI dependencies. Wired into `Game::logic()` (`eachFrame()`), `calculateGains()` (CPS bonus), `mouseCps()` (click bonus), and SaveLoad (per-building minigame save strings).
+  - **Minigames**: Garden (Farm plot grid, plant growth/mutations/harvest), Grimoire (Wizard tower mana/spells/cooldowns), Pantheon (Temple god slots/buffs/drawbacks), Dungeons (procedural generation via DungeonGen, floor progression, rewards). All core logic only — `draw()` stubbed, no UI dependencies. Wired into `Game::logic()` (`eachFrame()`), `calculateGains()` (CPS bonus), `mouseCps()` (click bonus), and SaveLoad (per-building minigame save strings). ✓
+  - **Settings / prefs (now)**: All 21 `Prefs` flags are decoded from savegame bitstring (SaveLoad.cpp section 3) ✓. Runtime accessors added: `getPref()`, `setPref()`, `togglePref()`. Behavioral effects wired: `wobbly` gates cookie wobble, `particles` gates `particlesUpdate()`, `autosave` gates autosave, `cookiesound` is a runtime flag ready to gate audio when wired.
   - **Sounds (next)**: `Audio.cpp` is a no-op stub; SDL2_mixer not installed on this box.
-  - **Clean UI UX**: deferred until core economy (buildings + upgrades + minigames + save/load round-trip) is stable.
+  - **Clean UI UX**: deferred until core economy (buildings + upgrades + minigames + settings + save/load round-trip) is stable.
 - **Phase 2 (after core stable)**: Save/Load round-trip verification, store row click-to-buy, particles, minigame UI.
 
 ### Active
-- Minigame core logic (Garden, Grimoire, Pantheon, Dungeons + Game wiring + SaveLoad)
+- Settings / prefs runtime flags (getPref/setPref/togglePref + behavioral effects)
 
 ### Blocked
 - Sounds: SDL2_mixer not installed on this box (`Audio.cpp` remains no-op stub)
