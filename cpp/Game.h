@@ -87,6 +87,7 @@ public:
     f64 heavenlyChipsSpent = 0.0;
     f64 heavenlyCookies = 0.0;
     i32 resets = 0;                       // JS field 14 ("ascensions" count)
+    i32 gainedPrestige = 0;               // prestige gained this ascension (JS Game.gainedPrestige)
     i32 ascensionMode = 0;                // JS field 29
     f64 cookiesPsRawHighest = 0.0;        // JS field 51
     i32 volumeMusic = 50;                 // JS field 52

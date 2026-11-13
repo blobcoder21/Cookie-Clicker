@@ -1419,8 +1419,11 @@ void Game::EarnHeavenlyChips(f64 cookiesForfeited) {
     i32 newPrestige = static_cast<i32>(std::floor(std::cbrt(total / 1000000000000.0)));
     if (newPrestige > static_cast<i32>(prestige)) {
         i32 gained = newPrestige - static_cast<i32>(prestige);
+        gainedPrestige = gained;
         heavenlyChips += static_cast<f64>(gained);
         prestige = static_cast<f64>(newPrestige);
+    } else {
+        gainedPrestige = 0;
     }
     // Clamp at zero (defensive; cbrt of a non-negative total is non-negative).
     if (prestige < 0.0) prestige = 0.0;
@@ -1483,9 +1486,10 @@ void Game::Reset(bool hard) {
     fortuneCPS = 0;
 
     // Successful ascension increments resets only when prestige was gained
-    // (mirrors JS). Zero-prestige ascensions still increment `ascensions`
-    // (done in reincarnate()).
-    if (static_cast<i32>(prestige) > 0) {
+    // (mirrors JS Game.Reset line 3794: if (!hard && Game.gainedPrestige>0) Game.resets++).
+    // Zero-prestige ascensions leave resets unchanged; `ascensions` (port-only,
+    // not serialized) is incremented in reincarnate() regardless.
+    if (!hard && gainedPrestige > 0) {
         resets++;
     }
 
@@ -1613,13 +1617,10 @@ void Game::reincarnate() {
     // 2. Count the ascension (separate from prestige level). A successful
     //    reincarnation always counts, even a zero-prestige ascension.
     ++ascensions;
-    if (static_cast<i32>(prestige) > 0 && static_cast<i32>(prestige) > 0) {
-        // Mirror JS: resets only increment when prestige was actually gained.
-        // (gainedPrestige is tracked via EarnHeavenlyChips above.)
-        resets = static_cast<i32>(std::max(static_cast<i32>(resets), 0));
-    }
 
     // 3. Reset run-specific state, preserving permanent progression.
+    //    Reset(false) increments `resets` when gainedPrestige > 0 (mirrors JS
+    //    Game.Reset line 3794).
     Reset(false);
 
     // 4. Re-apply permanent upgrade slot selections on the fresh run.

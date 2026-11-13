@@ -47,6 +47,12 @@
 - Version migrations (`<=1.0466` → heavenlyChips=prestige; `==1.9` → refund).
 - Season/milk clamping, wrinkler LoadWrinklers semantics (shinies first),
   buildings/upgrades/achievements/buffs/mod-data application.
+- **`resets` increment mirrors JS `Game.Reset` line 3794 exactly:**
+  `if (!hard && gainedPrestige > 0) resets++;`. A new `gainedPrestige` field
+  (set in `EarnHeavenlyChips`, mirroring JS `Game.gainedPrestige`) tracks the
+  prestige gained this ascension. Zero-prestige ascensions leave `resets`
+  unchanged; the port-only `ascensions` counter is incremented separately in
+  `reincarnate()` and is NOT serialized.
 - Post-parse side effects (CalculateGains, offline catch-up, loadLumps,
   killShimmers, etc.) stubbed; no tick between load & write in tests, so saved
   fields round-trip byte-identically.
@@ -63,6 +69,7 @@ Field 51 now writes `cookiesPsRawHighest`.
 - `Building`: added `minigameSave` (raw string, re-emitted on write) and
   `highest` (building entry field 6).
 - `Game.modSaveData` map added.
+- `Game.gainedPrestige` field added (mirrors JS `Game.gainedPrestige`).
 
 ### Stubbed (parse + store + re-emit, no simulation)
 Minigames (Garden/Grimoire/Pantheon/Dungeons save strings), wrinkler/shimmer
@@ -83,6 +90,11 @@ saveModData. These are parsed and re-emitted unchanged so nothing is dropped.
   output is idempotent on reload.
 - Truncated/garbage/wrong-version input → `parseSave` returns nullopt, game
   untouched, no crash.
+- Deterministic resets/ascensions tests (`/tmp/opencode/test_resets.cpp`):
+  - zero-prestige ascension leaves `resets` unchanged (T1);
+  - prestige-gaining ascension adds exactly 1 to `resets` (T2);
+  - `resets` survives save/load round-trip (T3); port-only `ascensions` does
+    not serialize (resets to default after load).
 
 ### Not yet reproduced exactly
 - Nothing known: every branch in `WriteSave`/`LoadSave` was ported. The only
