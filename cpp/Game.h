@@ -22,7 +22,7 @@
 class Game {
 public:
     // --- versioning --------------------------------------------------------
-    static constexpr f64 VERSION = 2.021;
+    static constexpr f64 VERSION = 2.058;   // port target: Cookie Clicker 2.058
     static constexpr i32 BETA = 1;
 
     // --- runtime flags -----------------------------------------------------
@@ -44,6 +44,7 @@ public:
     f64 startDate = 0.0;
     f64 fullDate = 0.0;
     std::string seed;              // seeded randomness
+    std::string appearance;        // YouCustomizer gene string (save section 2, field 5)
 
     // --- bakery ------------------------------------------------------------
     std::string bakeryName;
@@ -85,7 +86,12 @@ public:
     f64 heavenlyChips = 0.0;
     f64 heavenlyChipsSpent = 0.0;
     f64 heavenlyCookies = 0.0;
-    i32 resets = 0;
+    i32 resets = 0;                       // JS field 14 ("ascensions" count)
+    i32 ascensionMode = 0;                // JS field 29
+    f64 cookiesPsRawHighest = 0.0;        // JS field 51
+    i32 volumeMusic = 50;                 // JS field 52
+    i32 cookiesSent = 0;                  // JS field 53
+    i32 cookiesReceived = 0;              // JS field 54
     f64 lumps = 0.0;
     f64 lumpsTotal = 0.0;
     f64 lumpT = 0.0;
@@ -145,6 +151,10 @@ public:
     // --- ascension statistics ------------------------------------------------
     // Successful ascension count (separate from prestige level). Incremented
     // only when an ascension actually grants at least one prestige level.
+    // PORT-ONLY: v2.058's real save format stores only `resets` (section 4,
+    // field 14). This field is NOT serialized into the real save string so it
+    // cannot collide with the real field 51 (cookiesPsRawHighest); it lives as
+    // port-only sidecar state.
     i32 ascensions = 0;
 
     // --- preferences -------------------------------------------------------
@@ -170,6 +180,12 @@ public:
         bool askLumps = false;
         bool customGrandmas = true;
         bool timeout = false;
+        bool cloudSave = true;
+        bool bgMusic = true;
+        bool notScary = false;
+        bool fullscreen = false;
+        bool screenreader = false;
+        bool discordPresence = true;
     } prefs;
 
     // --- runtime collections -----------------------------------------------
@@ -191,6 +207,8 @@ public:
     using CustomCb = std::function<void()>;
     std::vector<CustomCb> customSave;
     std::vector<CustomCb> customDraw;
+    // mod save data (keyed by mod id), mirrors JS Game.modSaveData
+    std::map<std::string, std::string> modSaveData;
     // mouse Cps callbacks return an additive bonus (mirrors JS customMouseCps)
     std::vector<std::function<f64()>> customMouseCps;
     // mouse Cps multiplier callbacks return a factor (mirrors JS customMouseCpsMult)

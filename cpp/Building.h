@@ -61,6 +61,7 @@ public:
     f64 totalCookies = 0.0;
     f64 storedCps = 0.0;
     f64 storedTotalCps = 0.0;
+    i32 highest = 0;              // JS building entry field 6
 
     bool mouseOn = false;
     f64 mousePos[2] = {-100.0, -100.0};
@@ -70,6 +71,7 @@ public:
     // minigame
     std::string minigameUrl;
     std::string minigameName;
+    std::string minigameSave;    // raw minigame save string (re-emitted on write)
     bool onMinigame = false;
     bool minigameLoaded = false;
     class Minigame* minigame = nullptr;

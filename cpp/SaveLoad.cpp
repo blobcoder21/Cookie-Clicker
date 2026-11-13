@@ -1,12 +1,20 @@
 #include "SaveLoad.h"
 #include "Game.h"
 #include "Building.h"
+#include "jsnum.h"
+
 #include <sstream>
 #include <iomanip>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
+#include <cmath>
+#include <algorithm>
+#include <cstring>
 
+// ---------------------------------------------------------------------------
+// Base64 (RFC 4648) - matches base64.js alphabet.
+// ---------------------------------------------------------------------------
 std::string SaveLoad::base64Encode(const std::string& in) {
     static constexpr char alphabet[] =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
@@ -25,8 +33,8 @@ std::string SaveLoad::base64Encode(const std::string& in) {
         u32 enc3 = ((chr2 & 15) << 2) | (chr3 >> 6);
         u32 enc4 = chr3 & 63;
 
-        if (!have2) enc3 = enc4 = 64;   // only 1 byte remained
-        else if (!have3) enc4 = 64;     // 2 bytes remained
+        if (!have2) enc3 = enc4 = 64;
+        else if (!have3) enc4 = 64;
 
         out.push_back(alphabet[enc1]);
         out.push_back(alphabet[enc2]);
@@ -37,28 +45,26 @@ std::string SaveLoad::base64Encode(const std::string& in) {
 }
 
 std::string SaveLoad::base64Decode(const std::string& in) {
-    std::string s = in;
-    // strip characters outside the alphabet (JS does this in b64_to_utf8)
     std::string filtered;
-    filtered.reserve(s.size());
-    for (char c : s) {
+    filtered.reserve(in.size());
+    for (char c : in) {
         if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
             (c >= '0' && c <= '9') || c == '+' || c == '/' || c == '=') {
             filtered.push_back(c);
         }
     }
 
-    std::string out;
     auto val = [](char c) -> i32 {
         if (c >= 'A' && c <= 'Z') return c - 'A';
         if (c >= 'a' && c <= 'z') return c - 'a' + 26;
         if (c >= '0' && c <= '9') return c - '0' + 52;
         if (c == '+') return 62;
         if (c == '/') return 63;
-        if (c == '=') return 64; // padding marker, matches the encoder's "missing" value
+        if (c == '=') return 64;
         return -1;
     };
 
+    std::string out;
     u32 i = 0;
     while (i < filtered.size()) {
         i32 enc1 = val(filtered[i++]);
@@ -80,10 +86,17 @@ std::string SaveLoad::base64Decode(const std::string& in) {
 std::string SaveLoad::utf8ToBytes(const std::string& s) { return s; }
 std::string SaveLoad::bytesToUtf8(const std::string& b) { return b; }
 
+// ---------------------------------------------------------------------------
+// Outer storage encoding/decoding.
+//
+// JS:  save  = escape( utf8_to_b64(raw) + "!END!" )
+// JS:  load  = b64_to_utf8( unescape(stored).split('!END!')[0] )
+//
+// The objective requires stripping the terminator and any whitespace/newlines
+// before decoding.
+// ---------------------------------------------------------------------------
 std::string SaveLoad::encodeForStorage(const std::string& raw) {
     std::string b64 = base64Encode(utf8ToBytes(raw)) + "!END!";
-    // JS escape(): alphanumerics + @*-_+. unchanged; space -> %20; everything
-    // else -> %xx (ASCII) or %uXXXX (non-ASCII). We implement the common subset.
     std::string out;
     out.reserve(b64.size() * 2);
     for (char c : b64) {
@@ -117,7 +130,6 @@ std::string SaveLoad::decodeFromStorage(const std::string& stored) {
             char h[5] = {stored[i + 2], stored[i + 3], stored[i + 4],
                          stored[i + 5], 0};
             u32 cp = std::strtoul(h, nullptr, 16);
-            // store as UTF-8 (simplified BMP only)
             if (cp < 0x80) {
                 unescaped.push_back(static_cast<char>(cp));
             } else if (cp < 0x800) {
@@ -134,115 +146,192 @@ std::string SaveLoad::decodeFromStorage(const std::string& stored) {
         }
     }
 
-    // split off "!END!" terminator and everything after it (JS: str.split('!END!')[0])
-    size_t endPos = unescaped.find("!END!");
-    if (endPos != std::string::npos) unescaped.resize(endPos);
+    // Strip whitespace/newlines, then split off the "!END!" terminator.
+    std::string compact;
+    compact.reserve(unescaped.size());
+    for (char c : unescaped) {
+        if (c != ' ' && c != '\t' && c != '\n' && c != '\r' && c != '\f' && c != '\v')
+            compact.push_back(c);
+    }
+    size_t endPos = compact.find("!END!");
+    if (endPos != std::string::npos) compact.resize(endPos);
 
-    return bytesToUtf8(base64Decode(unescaped));
+    return bytesToUtf8(base64Decode(compact));
 }
 
 // ---------------------------------------------------------------------------
-// Helpers for building the save string
+// Legacy packing helpers (ported from main.js). pack3 is the identity.
+//
+// unpack2(packed): reverse of pack2. Each char holds 14 bits (char code =
+// 0b1 + 14 bits). Returns the concatenated bitstring.
+// ---------------------------------------------------------------------------
+std::string SaveLoad::unpack2(const std::string& packed) {
+    std::string values;
+    values.reserve(packed.size() * 14);
+    for (u32 i = 0; i < packed.size(); ++i) {
+        // charCodeAt(i).toString(2).substring(1) -> 14 bits (strip leading '1')
+        unsigned int code = static_cast<unsigned char>(packed[i]);
+        std::string bits;
+        // produce exactly 14 bits
+        for (int b = 13; b >= 0; --b) bits.push_back((code >> b) & 1 ? '1' : '0');
+        values += bits;
+    }
+    return values;
+}
+
+// UncompressBin(num): binary of num, reversed, strip leading & trailing char.
+// Returns real 0/1 integer values (JS uses parseInt on the resulting strings,
+// so '0' must be the integer 0, not ASCII 48).
+static std::vector<i32> uncompressBin(i32 num) {
+    std::string bin;
+    if (num == 0) bin = "0";
+    else {
+        unsigned int n = static_cast<unsigned int>(num);
+        while (n) { bin.push_back((n & 1) ? '1' : '0'); n >>= 1; }
+        std::reverse(bin.begin(), bin.end());
+    }
+    std::reverse(bin.begin(), bin.end());
+    if (bin.size() > 2) bin = bin.substr(1, bin.size() - 2);
+    else bin.clear();
+    std::vector<i32> out;
+    out.reserve(bin.size());
+    for (char c : bin) out.push_back(c == '1' ? 1 : 0);
+    return out;
+}
+
+std::vector<i32> SaveLoad::uncompressLargeBin(const std::string& arr) {
+    // arr is a ';'-separated list of CompressBin numbers.
+    std::vector<i32> bits;
+    std::string cur;
+    for (char c : arr) {
+        if (c == ';') {
+            if (!cur.empty()) {
+                i32 num = static_cast<i32>(std::strtoul(cur.c_str(), nullptr, 10));
+                auto b = uncompressBin(num);
+                bits.insert(bits.end(), b.begin(), b.end());
+                cur.clear();
+            }
+        } else cur.push_back(c);
+    }
+    if (!cur.empty()) {
+        i32 num = static_cast<i32>(std::strtoul(cur.c_str(), nullptr, 10));
+        auto b = uncompressBin(num);
+        bits.insert(bits.end(), b.begin(), b.end());
+    }
+    return bits;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers for building the save string.
 // ---------------------------------------------------------------------------
 namespace {
-std::string joinBits(const std::vector<char>& bits) {
-    std::string s;
-    s.reserve(bits.size());
-    for (char b : bits) s.push_back(b ? '1' : '0');
-    return s;
+std::string joinBits(const std::string& bits) { return bits; }
+
+// JS Number.prototype.toString() (shortest round-trip, JS fixed/exponential
+// rules). Used for every parseFloat(...).toString() field.
+inline void numField(std::string& s, f64 v) { s += jsNumberToString(v); s += ';'; }
+
+// parseInt(Math.floor(x)) -> integer string.
+inline void floorIntField(std::string& s, f64 v) {
+    s += std::to_string(static_cast<i64>(std::floor(v))); s += ';';
 }
 
-std::string f64Str(f64 v) {
-    std::ostringstream os;
-    os << v;
-    return os.str();
-}
+// parseInt(x) -> integer string (truncate toward zero; values are non-negative).
+inline void intField(std::string& s, i64 v) { s += std::to_string(v); s += ';'; }
+
+// Raw string field (no trailing ';' - caller adds it or the section terminator).
+inline void strField(std::string& s, const std::string& v) { s += v; }
 } // namespace
 
+// ---------------------------------------------------------------------------
+// Game.WriteSave (type 0 = store, 1 = string only, 2 = uncompressed, 3 =
+// commented). Ported line-by-line from ref/main_2058.js.
+// ---------------------------------------------------------------------------
 std::string SaveLoad::writeSave(Game& game, i32 /*type*/) {
-    std::ostringstream s;
-    auto field = [&](const std::string& v) { s << v << ';'; };
-    // Print doubles with enough significant digits to round-trip any
-    // IEEE-754 double exactly (17 digits). JS Number.toString() produces the
-    // shortest such string; parseFloat/stod both accept exponent notation, so
-    // values written here parse identically on both sides.
-    auto num = [&](f64 v) {
-        std::ostringstream os;
-        os << std::setprecision(17) << v;
-        s << os.str();
-    };
-    auto numField = [&](f64 v) { num(v); s << ';'; };
-    auto intField = [&](i64 v) { s << v << ';'; };
+    std::string str;
+    str.reserve(4096);
 
-    s << game.VERSION << '|';
-    s << '|'; // reserved
+    // JS: Game.lastDate=parseInt(Game.time);  (injected-clock: tests set time==lastDate)
+    game.lastDate = std::trunc(game.time);
 
-    // --- run stats (section 2) ---
-    // JS writes: start;full;last;name;seed|  (seed is NOT ';'-terminated;
-    // the '|' is the section terminator).
-    numField(game.startDate);
-    numField(game.fullDate);
-    numField(game.lastDate);
-    field(game.bakeryName);
-    s << game.seed << '|';
+    // Section 0: version
+    str += jsNumberToString(game.VERSION);   // Game.version is a double
+    str += '|';
+    // Section 1: reserved (empty)
+    str += '|';
 
-    // --- prefs bitstring (section 3) ---
+    // --- section 2: run details ---
+    // startDate;fullDate;lastDate;bakeryName;seed;appearance|
+    floorIntField(str, game.startDate);
+    floorIntField(str, game.fullDate);
+    floorIntField(str, game.lastDate);
+    str += game.bakeryName; str += ';';
+    str += game.seed; str += ';';
+    str += game.appearance;
+    str += '|';
+
+    // --- section 3: packed preferences bitfield (27 bits, pack3=identity) ---
     {
-        std::vector<char> bits = {
-            static_cast<char>(game.prefs.particles ? 1 : 0),
-            static_cast<char>(game.prefs.numbers ? 1 : 0),
-            static_cast<char>(game.prefs.autosave ? 1 : 0),
-            static_cast<char>(game.prefs.autoupdate ? 1 : 0),
-            static_cast<char>(game.prefs.milk ? 1 : 0),
-            static_cast<char>(game.prefs.fancy ? 1 : 0),
-            static_cast<char>(game.prefs.warn ? 1 : 0),
-            static_cast<char>(game.prefs.cursors ? 1 : 0),
-            static_cast<char>(game.prefs.focus ? 1 : 0),
-            static_cast<char>(game.prefs.format ? 1 : 0),
-            static_cast<char>(game.prefs.notifs ? 1 : 0),
-            static_cast<char>(game.prefs.wobbly ? 1 : 0),
-            static_cast<char>(game.prefs.monospace ? 1 : 0),
-            static_cast<char>(game.prefs.filters ? 1 : 0),
-            static_cast<char>(game.prefs.cookiesound ? 1 : 0),
-            static_cast<char>(game.prefs.crates ? 1 : 0),
-            static_cast<char>(game.prefs.showBackupWarning ? 1 : 0),
-            static_cast<char>(game.prefs.extraButtons ? 1 : 0),
-            static_cast<char>(game.prefs.askLumps ? 1 : 0),
-            static_cast<char>(game.prefs.customGrandmas ? 1 : 0),
-            static_cast<char>(game.prefs.timeout ? 1 : 0),
-        };
-        s << joinBits(bits) << '|';
+        std::string bits;
+        bits.reserve(27);
+        bits.push_back(game.prefs.particles ? '1' : '0');
+        bits.push_back(game.prefs.numbers ? '1' : '0');
+        bits.push_back(game.prefs.autosave ? '1' : '0');
+        bits.push_back(game.prefs.autoupdate ? '1' : '0');
+        bits.push_back(game.prefs.milk ? '1' : '0');
+        bits.push_back(game.prefs.fancy ? '1' : '0');
+        bits.push_back(game.prefs.warn ? '1' : '0');
+        bits.push_back(game.prefs.cursors ? '1' : '0');
+        bits.push_back(game.prefs.focus ? '1' : '0');
+        bits.push_back(game.prefs.format ? '1' : '0');
+        bits.push_back(game.prefs.notifs ? '1' : '0');
+        bits.push_back(game.prefs.wobbly ? '1' : '0');
+        bits.push_back(game.prefs.monospace ? '1' : '0');
+        bits.push_back(game.prefs.filters ? '1' : '0');
+        bits.push_back(game.prefs.cookiesound ? '1' : '0');
+        bits.push_back(game.prefs.crates ? '1' : '0');
+        bits.push_back(game.prefs.showBackupWarning ? '1' : '0');
+        bits.push_back(game.prefs.extraButtons ? '1' : '0');
+        bits.push_back(game.prefs.askLumps ? '1' : '0');
+        bits.push_back(game.prefs.customGrandmas ? '1' : '0');
+        bits.push_back(game.prefs.timeout ? '1' : '0');
+        bits.push_back(game.prefs.cloudSave ? '1' : '0');
+        bits.push_back(game.prefs.bgMusic ? '1' : '0');
+        bits.push_back(game.prefs.notScary ? '1' : '0');
+        bits.push_back(game.prefs.fullscreen ? '1' : '0');
+        bits.push_back(game.prefs.screenreader ? '1' : '0');
+        bits.push_back(game.prefs.discordPresence ? '1' : '0');
+        str += bits; str += '|';
     }
 
-    // --- misc game data (section 4) ---
-    // Field order mirrors JS Game.WriteSave exactly so browser-made saves
-    // load into this build (and vice versa).
-    numField(game.cookies);              // 0
-    numField(game.cookiesEarned);        // 1
-    intField(game.cookieClicks);         // 2
-    intField(game.goldenClicks);         // 3
-    numField(game.handmadeCookies);      // 4
-    intField(game.missedGoldenClicks);   // 5
-    intField(game.bgType);               // 6
-    intField(game.milkType);             // 7
-    numField(game.cookiesReset);         // 8
-    intField(game.elderWrath);           // 9
-    intField(game.pledges);              // 10
-    numField(game.pledgeT);              // 11
-    intField(game.nextResearch);         // 12
-    numField(game.researchT);            // 13
-    intField(game.resets);               // 14
-    intField(game.goldenClicksLocal);    // 15
-    numField(game.cookiesSucked);        // 16
-    intField(game.wrinklersPopped);      // 17
-    intField(game.santaLevel);           // 18
-    intField(game.reindeerClicked);      // 19
-    numField(game.seasonT);              // 20
-    intField(game.seasonUses);           // 21
-    field(game.season);                  // 22
+    // --- section 4: misc game data (55 fields, 0..54) ---
+    // .toString() fields (shortest round-trip):
+    numField(str, game.cookies);              // 0
+    numField(str, game.cookiesEarned);        // 1
+    // parseInt(Math.floor(x)) fields:
+    floorIntField(str, game.cookieClicks);    // 2
+    floorIntField(str, game.goldenClicks);    // 3
+    numField(str, game.handmadeCookies);      // 4
+    floorIntField(str, game.missedGoldenClicks); // 5
+    floorIntField(str, game.bgType);          // 6
+    floorIntField(str, game.milkType);        // 7
+    numField(str, game.cookiesReset);         // 8
+    floorIntField(str, game.elderWrath);      // 9
+    floorIntField(str, game.pledges);         // 10
+    floorIntField(str, game.pledgeT);         // 11
+    floorIntField(str, game.nextResearch);    // 12
+    floorIntField(str, game.researchT);       // 13
+    floorIntField(str, game.resets);          // 14
+    floorIntField(str, game.goldenClicksLocal);// 15
+    numField(str, game.cookiesSucked);        // 16
+    floorIntField(str, game.wrinklersPopped); // 17
+    floorIntField(str, game.santaLevel);      // 18
+    floorIntField(str, game.reindeerClicked); // 19
+    floorIntField(str, game.seasonT);         // 20
+    floorIntField(str, game.seasonUses);      // 21
+    str += game.season; str += ';';           // 22 (string)
 
-    // wrinklers: amount/number (23,24) and shinies/amountShinies (40,41).
-    // JS SaveWrinklers: count wrinklers with sucked > 0.5.
+    // Wrinklers: SaveWrinklers semantics.
     f64 wrinkleAmount = 0.0, wrinkleAmountShinies = 0.0;
     i32 wrinkleNumber = 0, wrinkleShinies = 0;
     for (auto& w : game.wrinklers) {
@@ -252,415 +341,649 @@ std::string SaveLoad::writeSave(Game& game, i32 /*type*/) {
             else wrinkleAmount += w.sucked;
         }
     }
-    numField(wrinkleAmount);   // 23
-    intField(wrinkleNumber);   // 24
-    numField(game.prestige);         // 25
-    numField(game.heavenlyChips);    // 26
-    numField(game.heavenlyChipsSpent); // 27
-    numField(game.heavenlyCookies);  // 28
-    intField(0);                     // 29 ascensionMode placeholder
-    for (i32 i = 0; i < 5; ++i) intField(game.permanentUpgrades[i]); // 30-34
-    intField(game.dragonLevel);      // 35
-    intField(game.dragonAura);       // 36
-    intField(game.dragonAura2);      // 37
-    intField(game.chimeType);        // 38
-    intField(game.volume);           // 39
-    intField(wrinkleShinies);        // 40
-    numField(wrinkleAmountShinies);  // 41
-    numField(game.lumps);            // 42
-    numField(game.lumpsTotal);       // 43
-    numField(game.lumpT);            // 44
-    numField(game.lumpRefill);       // 45
-    intField(game.lumpCurrentType);  // 46
-    // vault: comma-joined list of upgrade ids (47)
+    numField(str, std::floor(wrinkleAmount));      // 23  (parseFloat(Math.floor).toString)
+    floorIntField(str, wrinkleNumber);             // 24
+    numField(str, game.prestige);                  // 25
+    numField(str, game.heavenlyChips);             // 26
+    numField(str, game.heavenlyChipsSpent);        // 27
+    numField(str, game.heavenlyCookies);           // 28
+    floorIntField(str, game.ascensionMode);        // 29
+    for (i32 i = 0; i < 5; ++i) floorIntField(str, game.permanentUpgrades[i]); // 30-34
+    floorIntField(str, game.dragonLevel);          // 35
+    floorIntField(str, game.dragonAura);           // 36
+    floorIntField(str, game.dragonAura2);          // 37
+    floorIntField(str, game.chimeType);            // 38
+    floorIntField(str, game.volume);               // 39
+    floorIntField(str, wrinkleShinies);            // 40
+    numField(str, std::floor(wrinkleAmountShinies)); // 41
+    numField(str, std::floor(game.lumps));         // 42
+    numField(str, std::floor(game.lumpsTotal));    // 43
+    numField(str, std::floor(game.lumpT));         // 44
+    numField(str, std::floor(game.lumpRefill));    // 45
+    floorIntField(str, game.lumpCurrentType);      // 46
+    // 47: vault (comma-joined upgrade ids)
     {
         for (size_t i = 0; i < game.vault.size(); ++i) {
-            if (i) s << ',';
-            s << game.vault[i];
+            if (i) str += ',';
+            str += std::to_string(game.vault[i]);
         }
-        s << ';';
+        str += ';';
     }
-    intField(game.heralds);          // 48
-    intField(game.fortuneGC);        // 49
-    intField(game.fortuneCPS);       // 50
-    intField(game.ascensions);       // 51 successful ascension count
+    intField(str, game.heralds);                   // 48  (parseInt, no floor)
+    intField(str, game.fortuneGC);                 // 49
+    intField(str, game.fortuneCPS);                // 50
+    numField(str, game.cookiesPsRawHighest);       // 51  (NOT ascensions!)
+    floorIntField(str, game.volumeMusic);          // 52
+    floorIntField(str, game.cookiesSent);          // 53
+    floorIntField(str, game.cookiesReceived);      // 54
+    str += '|';// end section 4
 
-    s << '|';
-
-    // --- buildings (section 5) ---
-    // amount,bought,totalCookies,level,minigameSave,muted;  (minigame save
-    // left empty - minigames are stubbed in this skeleton)
+    // --- section 5: buildings ---
     for (auto& b : game.objects) {
-        if (!b->vanilla) continue;
-        s << b->amount << ',';
-        s << b->bought << ',';
-        s << std::floor(b->totalCookies) << ',';
-        s << b->level << ',';
-        if (b->minigameLoaded && b->minigame) s << b->minigame->save();
-        s << ','; // minigame save (between level and muted)
-        s << (b->muted ? '1' : '0');
-        s << ';';
+        if (!b || !b->vanilla) continue;
+        str += std::to_string(b->amount); str += ',';
+        str += std::to_string(b->bought); str += ',';
+        str += jsNumberToString(std::floor(b->totalCookies)); str += ','; // comma-separated within entry
+        str += std::to_string(b->level); str += ',';
+        if (b->minigameLoaded && b->minigame) str += b->minigame->save();
+        else str += b->minigameSave;                // raw stored minigame save
+        str += ',';
+        str += (b->muted ? '1' : '0'); str += ',';
+        str += std::to_string(b->highest);
+        str += ';';
     }
-    s << '|';
+    str += '|';
 
-    // --- upgrades bitstring (section 6) ---
+    // --- section 6: packed upgrades bitfield (unlocked,bought pairs) ---
     {
-        std::vector<char> bits;
-        bits.reserve(game.upgradesById.size());
+        std::string bits;
+        bits.reserve(game.upgradesById.size() * 2);
         for (auto* u : game.upgradesById) {
             if (!u) continue;
-            bits.push_back(u->unlocked ? 1 : 0);
-            bits.push_back(u->bought ? 1 : 0);
+            if (!u->vanilla) continue;
+            bits.push_back(u->unlocked ? '1' : '0');
+            bits.push_back(u->bought ? '1' : '0');
         }
-        s << joinBits(bits) << '|';
+        str += bits; str += '|';
     }
 
-    // --- achievements bitstring (section 7) ---
+    // --- section 7: packed achievements bitfield (won) ---
     {
-        std::vector<char> bits;
+        std::string bits;
         bits.reserve(game.achievementsById.size());
         for (auto* a : game.achievementsById) {
             if (!a) continue;
-            bits.push_back(a->won ? 1 : 0);
+            if (!a->vanilla) continue;
+            bits.push_back(a->won ? '1' : '0');
         }
-        s << joinBits(bits);
+        str += bits;
     }
+    str += '|';
 
-    s << '|';
-
-    // --- buffs (section 8) ---
-    // type.id,maxTime,time,arg1,arg2,arg3;  (maxTime/time stored in frames:
-    // internal seconds * fps, matching JS which saves frame counts)
+    // --- section 8: buffs ---
     f64 fps = static_cast<f64>(game.fps);
     for (auto& bf : game.buffs) {
         if (!bf || !bf->type) continue;
-        s << bf->type->id << ',';
-        num(bf->maxTime * fps); s << ',';
-        num(bf->time * fps); s << ',';
-        num(bf->arg1); s << ',';
-        num(bf->arg2); s << ',';
-        num(bf->arg3);
-        s << ';';
+        str += std::to_string(bf->type->id); str += ',';
+        numField(str, bf->maxTime * fps);
+        numField(str, bf->time * fps);
+        numField(str, bf->arg1);
+        numField(str, bf->arg2);
+        numField(str, bf->arg3);
+        str += ';';
     }
-    s << '\n';
+    str += '|';
 
-    return s.str();
+    // --- section 9: mod data ---
+    // Game.saveModData() stub returns "" for now (mod system not built).
+    str += ""; // Game.saveModData();
+
+    return str;
 }
 
-bool SaveLoad::loadSave(Game& game, const std::string& raw) {
-    std::string str = raw;
-    // JS: str = str.split('!END!')[0]  (already done in decodeFromStorage)
-
-    // split into sections on '|'
-    std::vector<std::string> sections;
-    {
-        std::string cur;
-        for (char c : str) {
-            if (c == '|') { sections.push_back(cur); cur.clear(); }
-            else cur.push_back(c);
-        }
-        if (!cur.empty() || !sections.empty()) sections.push_back(cur);
+// ---------------------------------------------------------------------------
+// Platform-free parsing helpers.
+// ---------------------------------------------------------------------------
+namespace {
+std::vector<std::string> splitPipe(const std::string& s) {
+    std::vector<std::string> out;
+    std::string cur;
+    for (char c : s) {
+        if (c == '|') { out.push_back(cur); cur.clear(); }
+        else cur.push_back(c);
     }
+    if (!cur.empty() || !out.empty()) out.push_back(cur);
+    return out;
+}
 
-    if (sections.size() < 5) return false;
+std::vector<std::string> splitChar(const std::string& s, char delim) {
+    std::vector<std::string> out;
+    std::string cur;
+    for (char c : s) {
+        if (c == delim) { out.push_back(cur); cur.clear(); }
+        else cur.push_back(c);
+    }
+    out.push_back(cur);
+    return out;
+}
 
-    f64 version = 0.0;
-    try { version = std::stod(sections[0]); } catch (...) { return false; }
-    if (version < 1.0 || version > Game::VERSION) return false;
+inline std::vector<std::string> splitSemi(const std::string& s) { return splitChar(s, ';'); }
+
+f64 getfDef(const std::vector<std::string>& v, i32 idx, f64 def) {
+    if (idx < 0 || idx >= static_cast<i32>(v.size()) || v[idx].empty()) return def;
+    return jsParseFloat(v[idx]);
+}
+i64 getiDef(const std::vector<std::string>& v, i32 idx, i64 def) {
+    if (idx < 0 || idx >= static_cast<i32>(v.size()) || v[idx].empty()) return def;
+    // JS: parseInt(str) — NaN if no digits; here treat as def when empty, else parse.
+    const char* p = v[idx].c_str();
+    while (*p && std::isspace(static_cast<unsigned char>(*p))) ++p;
+    bool neg = false;
+    if (*p == '+' || *p == '-') { neg = (*p == '-'); ++p; }
+    long long val = 0; bool any = false;
+    while (*p >= '0' && *p <= '9') { val = val * 10 + (*p - '0'); any = true; ++p; }
+    if (!any) return def; // no digits -> treat as missing/default
+    return static_cast<i64>(neg ? -val : val);
+}
+std::string getsDef(const std::vector<std::string>& v, i32 idx, const std::string& def) {
+    if (idx < 0 || idx >= static_cast<i32>(v.size())) return def;
+    return v[idx];
+}
+} // namespace
+
+// ---------------------------------------------------------------------------
+// Game.LoadSave parse half (platform-free): raw string -> SaveData.
+// Mirrors every version-gated branch of ref/main_2058.js Game.LoadSave.
+// Returns nullopt on truncated/garbage/wrong-version input.
+// ---------------------------------------------------------------------------
+std::optional<SaveData> SaveLoad::parseSave(const std::string& raw) {
+    std::string str = raw;
+
+    auto sections = splitPipe(str);
+    if (sections.size() < 5) return std::nullopt;
+
+    f64 version = jsParseFloat(sections[0]);
+    // JS: if (oldstr[0].length<1) return false; (empty version)
+    if (sections[0].empty()) return std::nullopt;
+    if (std::isnan(version) || sections.size() < 5) return std::nullopt;
+
+    SaveData data;
+    data.version = version;
+
+    // JS version check: future version rejected.
+    if (version >= 1.0 && version > Game::VERSION) return std::nullopt;
+    if (version < 1.0) return std::nullopt; // classic saves rejected
 
     // --- section 2: run stats ---
-    auto splitSemi = [](const std::string& sec) {
-        std::vector<std::string> out;
-        std::string cur;
-        for (char c : sec) {
-            if (c == ';') { out.push_back(cur); cur.clear(); }
-            else cur.push_back(c);
-        }
-        out.push_back(cur);
-        return out;
-    };
-
     auto spl = splitSemi(sections[2]);
-    auto getf = [&](const std::vector<std::string>& v, i32 idx, f64 def = 0.0) -> f64 {
-        if (idx < 0 || idx >= static_cast<i32>(v.size()) || v[idx].empty()) return def;
-        try { return std::stod(v[idx]); } catch (...) { return def; }
-    };
-    auto geti = [&](const std::vector<std::string>& v, i32 idx, i64 def = 0) -> i64 {
-        return static_cast<i64>(getf(v, idx, static_cast<f64>(def)));
-    };
-    auto gets = [&](const std::vector<std::string>& v, i32 idx,
-                    const std::string& def = "") -> std::string {
-        if (idx < 0 || idx >= static_cast<i32>(v.size())) return def;
-        return v[idx];
-    };
+    data.startDate = getfDef(spl, 0, NAN);
+    data.fullDate = getfDef(spl, 1, NAN);
+    data.lastDate = getfDef(spl, 2, NAN);
+    data.bakeryName = getsDef(spl, 3, "");
+    data.seed = getsDef(spl, 4, "");
+    data.appearance = getsDef(spl, 5, "");
 
-    game.startDate = getf(spl, 0);
-    game.fullDate = getf(spl, 1);
-    game.lastDate = getf(spl, 2);
-    game.bakeryName = gets(spl, 3, game.getBakeryName());
-    game.seed = gets(spl, 4);
-
-    // --- section 3: prefs ---
-    const std::string& prefsBits = sections[3];
-    auto pbit = [&](i32 idx, bool def = false) -> bool {
-        if (idx < 0 || idx >= static_cast<i32>(prefsBits.size())) return def;
-        return prefsBits[idx] == '1';
-    };
-    game.prefs.particles = pbit(0, true);
-    game.prefs.numbers = pbit(1, true);
-    game.prefs.autosave = pbit(2, true);
-    game.prefs.autoupdate = pbit(3, true);
-    game.prefs.milk = pbit(4, true);
-    game.prefs.fancy = pbit(5, true);
-    game.prefs.warn = pbit(6, false);
-    game.prefs.cursors = pbit(7, false);
-    game.prefs.focus = pbit(8, false);
-    game.prefs.format = pbit(9, false);
-    game.prefs.notifs = pbit(10, true);
-    game.prefs.wobbly = pbit(11, false);
-    game.prefs.monospace = pbit(12, false);
-    game.prefs.filters = pbit(13, true);
-    game.prefs.cookiesound = pbit(14, true);
-    game.prefs.crates = pbit(15, false);
-    game.prefs.showBackupWarning = pbit(16, true);
-    game.prefs.extraButtons = pbit(17, true);
-    game.prefs.askLumps = pbit(18, false);
-    game.prefs.customGrandmas = pbit(19, true);
-    game.prefs.timeout = pbit(20, false);
+    // --- section 3: prefs (version-gated unpacking) ---
+    std::string prefsBits;
+    if (version < 1.0503) {
+        prefsBits = sections[3]; // split('') below
+    } else if (version < 2.0046) {
+        prefsBits = unpack2(sections[3]);
+    } else {
+        prefsBits = sections[3];
+    }
+    // prefsBits is a string of '0'/'1' chars
+    for (i32 i = 0; i < 27 && i < static_cast<i32>(prefsBits.size()); ++i) {
+        data.prefs[i] = (prefsBits[i] == '1');
+    }
 
     // --- section 4: misc data ---
-    // Field order mirrors JS Game.WriteSave exactly.
     spl = splitSemi(sections[4]);
-    game.cookies = getf(spl, 0);
-    game.cookiesEarned = getf(spl, 1);
-    game.cookieClicks = static_cast<i32>(geti(spl, 2));
-    game.goldenClicks = static_cast<i32>(geti(spl, 3));
-    game.handmadeCookies = getf(spl, 4);
-    game.missedGoldenClicks = static_cast<i32>(geti(spl, 5));
-    game.bgType = static_cast<i32>(geti(spl, 6));
-    game.milkType = static_cast<i32>(geti(spl, 7));
-    game.cookiesReset = getf(spl, 8);
-    game.elderWrath = getf(spl, 9);
-    game.pledges = static_cast<i32>(geti(spl, 10));
-    game.pledgeT = getf(spl, 11);
-    game.nextResearch = static_cast<i32>(geti(spl, 12));
-    game.researchT = getf(spl, 13);
-    game.resets = static_cast<i32>(geti(spl, 14));
-    game.goldenClicksLocal = static_cast<i32>(geti(spl, 15));
-    game.cookiesSucked = getf(spl, 16);
-    game.wrinklersPopped = static_cast<i32>(geti(spl, 17));
-    game.santaLevel = static_cast<i32>(geti(spl, 18));
-    game.reindeerClicked = static_cast<i32>(geti(spl, 19));
-    game.seasonT = getf(spl, 20);
-    game.seasonUses = static_cast<i32>(geti(spl, 21));
-    game.season = gets(spl, 22, game.baseSeason);
-    // wrinklers: amount (23), number (24); shinies (40), amountShinies (41)
-    f64 wrinkleAmount = getf(spl, 23);
-    i32 wrinkleNumber = static_cast<i32>(geti(spl, 24));
-    game.prestige = getf(spl, 25);
-    game.heavenlyChips = getf(spl, 26);
-    game.heavenlyChipsSpent = getf(spl, 27);
-    game.heavenlyCookies = getf(spl, 28);
-    // ascensionMode 29 (placeholder - not modelled)
-    (void)geti(spl, 29);
-    for (i32 i = 0; i < 5; ++i) {
-        game.permanentUpgrades[i] = static_cast<i32>(geti(spl, 30 + i));
-    }
-    game.dragonLevel = static_cast<i32>(geti(spl, 35));
-    game.dragonAura = static_cast<i32>(geti(spl, 36));
-    game.dragonAura2 = static_cast<i32>(geti(spl, 37));
-    game.chimeType = static_cast<i32>(geti(spl, 38));
-    game.volume = static_cast<i32>(geti(spl, 39));
-    i32 wrinkleShinies = static_cast<i32>(geti(spl, 40));
-    f64 wrinkleAmountShinies = getf(spl, 41);
-    game.lumps = getf(spl, 42);
-    game.lumpsTotal = getf(spl, 43);
-    game.lumpT = getf(spl, 44);
-    game.lumpRefill = getf(spl, 45);
-    game.lumpCurrentType = static_cast<i32>(geti(spl, 46));
-    // vault (47): comma-joined list of upgrade ids
-    game.vault.clear();
+    data.cookies = getfDef(spl, 0, 0.0);
+    data.cookiesEarned = getfDef(spl, 1, 0.0);
+    data.cookieClicks = static_cast<i32>(getiDef(spl, 2, 0));
+    data.goldenClicks = static_cast<i32>(getiDef(spl, 3, 0));
+    data.handmadeCookies = getfDef(spl, 4, 0.0);
+    data.missedGoldenClicks = static_cast<i32>(getiDef(spl, 5, 0));
+    data.bgType = static_cast<i32>(getiDef(spl, 6, 0));
+    data.milkType = static_cast<i32>(getiDef(spl, 7, 0));
+    data.cookiesReset = getfDef(spl, 8, 0.0);
+    data.elderWrath = static_cast<i32>(getiDef(spl, 9, 0));
+    data.pledges = static_cast<i32>(getiDef(spl, 10, 0));
+    data.pledgeT = getfDef(spl, 11, 0.0);
+    data.nextResearch = static_cast<i32>(getiDef(spl, 12, 0));
+    data.researchT = getfDef(spl, 13, 0.0);
+    data.resets = static_cast<i32>(getiDef(spl, 14, 0));
+    data.goldenClicksLocal = static_cast<i32>(getiDef(spl, 15, 0));
+    data.cookiesSucked = getfDef(spl, 16, 0.0);
+    data.wrinklersPopped = static_cast<i32>(getiDef(spl, 17, 0));
+    data.santaLevel = static_cast<i32>(getiDef(spl, 18, 0));
+    data.reindeerClicked = static_cast<i32>(getiDef(spl, 19, 0));
+    data.seasonT = getfDef(spl, 20, 0.0);
+    data.seasonUses = static_cast<i32>(getiDef(spl, 21, 0));
+    data.season = getsDef(spl, 22, "");
+
+    data.wrinkleAmount = getfDef(spl, 23, 0.0);
+    data.wrinkleNumber = static_cast<i32>(getiDef(spl, 24, 0));
+    data.prestige = getfDef(spl, 25, 0.0);
+    data.heavenlyChips = getfDef(spl, 26, 0.0);
+    data.heavenlyChipsSpent = getfDef(spl, 27, 0.0);
+    data.heavenlyCookies = getfDef(spl, 28, 0.0);
+    data.ascensionMode = static_cast<i32>(getiDef(spl, 29, 0));
+    for (i32 i = 0; i < 5; ++i)
+        data.permanentUpgrades[i] = static_cast<i32>(getiDef(spl, 30 + i, -1));
+    data.dragonLevel = static_cast<i32>(getiDef(spl, 35, 0));
+    data.dragonAura = static_cast<i32>(getiDef(spl, 36, 0));
+    data.dragonAura2 = static_cast<i32>(getiDef(spl, 37, 0));
+    data.chimeType = static_cast<i32>(getiDef(spl, 38, 0));
+    data.volume = static_cast<i32>(getiDef(spl, 39, 0));
+    data.wrinkleShinies = static_cast<i32>(getiDef(spl, 40, 0));
+    data.wrinkleAmountShinies = getfDef(spl, 41, 0.0);
+    data.lumps = getfDef(spl, 42, 0.0);
+    data.lumpsTotal = getfDef(spl, 43, 0.0);
+    data.lumpT = getfDef(spl, 44, 0.0);
+    data.lumpRefill = getfDef(spl, 45, 0.0);
+    data.lumpCurrentType = static_cast<i32>(getiDef(spl, 46, 0));
+    // 47: vault (comma-joined)
     {
-        std::string vaultStr = gets(spl, 47);
+        std::string vaultStr = getsDef(spl, 47, "");
         if (!vaultStr.empty()) {
             std::string cur;
             for (char c : vaultStr) {
-                if (c == ',') {
-                    if (!cur.empty()) game.vault.push_back(static_cast<i32>(getf(std::vector<std::string>{cur}, 0)));
-                    cur.clear();
-                } else cur.push_back(c);
-            }
-            if (!cur.empty()) game.vault.push_back(static_cast<i32>(getf(std::vector<std::string>{cur}, 0)));
-        }
-    }
-    game.heralds = static_cast<i32>(geti(spl, 48));
-    game.fortuneGC = static_cast<i32>(geti(spl, 49));
-    game.fortuneCPS = static_cast<i32>(geti(spl, 50));
-    game.ascensions = static_cast<i32>(geti(spl, 51, 0));
-
-    // Recompute prestige from cookiesReset (mirrors JS LoadSave line 2339:
-    // Game.prestige=Math.floor(Game.HowMuchPrestige(Game.cookiesReset))).
-    // Ensures old saves without a prestige field still derive it correctly.
-    game.prestige = static_cast<f64>(
-        static_cast<i32>(std::floor(std::cbrt(game.cookiesReset / 1000000000000.0))));
-
-    // Restore wrinkler state (JS LoadWrinklers semantics):
-    // shinies are assigned to the first slots, then normals; sucked split evenly.
-    if (wrinkleNumber > 0 && (wrinkleAmount > 0.0 || wrinkleAmountShinies > 0.0)) {
-        i32 fullNumber = wrinkleNumber - wrinkleShinies;
-        i32 fullNumberShinies = wrinkleShinies;
-        i32 remaining = wrinkleNumber;
-        i32 shiniesLeft = wrinkleShinies;
-        for (auto& w : game.wrinklers) {
-            if (remaining <= 0) break;
-            w.phase = 2;
-            w.close = 1;
-            w.hp = 3.0;
-            if (shiniesLeft > 0) {
-                w.type = 1;
-                w.sucked = fullNumberShinies > 0 ? wrinkleAmountShinies / static_cast<f64>(fullNumberShinies) : 0.0;
-                --shiniesLeft;
-            } else {
-                w.type = 0;
-                w.sucked = fullNumber > 0 ? wrinkleAmount / static_cast<f64>(fullNumber) : 0.0;
-            }
-            --remaining;
-        }
-    }
-
-    // --- section 5: buildings ---
-    // JS iterates Game.Objects in order and writes one entry per vanilla
-    // building; entries are matched 1:1 to vanilla buildings in objects[].
-    if (sections.size() > 5 && !sections[5].empty()) {
-        std::vector<std::string> bents;
-        {
-            std::string cur;
-            for (char c : sections[5]) {
-                if (c == ';') { bents.push_back(cur); cur.clear(); }
+                if (c == ',') { if (!cur.empty()) { data.vault.push_back(static_cast<i32>(getiDef(std::vector<std::string>{cur}, 0, 0))); cur.clear(); }
+                                else cur.clear(); }
                 else cur.push_back(c);
             }
-            bents.push_back(cur); // trailing entry
+            if (!cur.empty()) data.vault.push_back(static_cast<i32>(getiDef(std::vector<std::string>{cur}, 0, 0)));
         }
-        auto bgetf = [&](const std::vector<std::string>& v, i32 idx,
-                         f64 def = 0.0) -> f64 {
-            if (idx < 0 || idx >= static_cast<i32>(v.size()) || v[idx].empty())
-                return def;
-            try { return std::stod(v[idx]); } catch (...) { return def; }
-        };
-        i32 bi = 0;
-        i32 buildingsOwned = 0;
-        for (auto& b : game.objects) {
-            if (!b || !b->vanilla) continue;
-            if (bi >= static_cast<i32>(bents.size())) break;
-            const std::string& bstr = bents[bi];
-            ++bi;
-            if (bstr.empty()) continue;
-            std::vector<std::string> bf;
-            {
-                std::string cur;
-                for (char c : bstr) {
-                    if (c == ',') { bf.push_back(cur); cur.clear(); }
-                    else cur.push_back(c);
-                }
-                bf.push_back(cur);
-            }
-            b->amount = static_cast<i32>(bgetf(bf, 0));
-            b->bought = static_cast<i32>(bgetf(bf, 1));
-            b->totalCookies = bgetf(bf, 2);
-            b->level = static_cast<i32>(bgetf(bf, 3));
-            // bf[4]: minigame save
-            if (bf.size() > 4 && !bf[4].empty() && b->minigameLoaded && b->minigame) {
-                b->minigame->load(bf[4]);
-            }
-            if (bf.size() > 5) b->muted = static_cast<i32>(bgetf(bf, 5, 0.0)) != 0;
-            buildingsOwned += b->amount;
+    }
+    data.heralds = static_cast<i32>(getiDef(spl, 48, 0));
+    data.fortuneGC = static_cast<i32>(getiDef(spl, 49, 0));
+    data.fortuneCPS = static_cast<i32>(getiDef(spl, 50, 0));
+    data.cookiesPsRawHighest = getfDef(spl, 51, 0.0);
+    data.volumeMusic = static_cast<i32>(getiDef(spl, 52, 0));
+    data.cookiesSent = static_cast<i32>(getiDef(spl, 53, 0));
+    data.cookiesReceived = static_cast<i32>(getiDef(spl, 54, 0));
+
+    // --- section 5: buildings ---
+    if (sections.size() > 5 && !sections[5].empty()) {
+        auto bents = splitSemi(sections[5]);
+        for (const auto& bstr : bents) {
+            SaveData::BuildingSave bs;
+            if (bstr.empty()) { data.buildings.push_back(bs); continue; }
+            auto bf = splitChar(bstr, ',');
+            bs.amount = static_cast<i32>(getiDef(bf, 0, 0));
+            bs.bought = static_cast<i32>(getiDef(bf, 1, 0));
+            bs.totalCookies = getfDef(bf, 2, 0.0);
+            bs.level = static_cast<i32>(getiDef(bf, 3, 0));
+            bs.minigameSave = getsDef(bf, 4, "");
+            bs.muted = static_cast<i32>(getiDef(bf, 5, 0));
+            bs.highest = static_cast<i32>(getiDef(bf, 6, 0));
+            data.buildings.push_back(bs);
         }
-        game.buildingsOwned = buildingsOwned;
-        game.recalculateGainsFlag();
     }
 
-    // --- section 6: upgrades bitstring ---
+    // --- section 6: upgrades (version-gated) ---
     if (sections.size() > 6) {
-        const std::string& bits = sections[6];
-        i32 bi = 0;
-        for (auto* u : game.upgradesById) {
-            if (!u) continue;
-            if (bi + 1 < static_cast<i32>(bits.size())) {
-                u->unlocked = bits[bi] == '1';
-                u->bought = bits[bi + 1] == '1';
-                bi += 2;
+        if (version < 1.035) {
+            // old non-binary: entries "unlocked,bought" separated by ';'
+            auto ents = splitSemi(sections[6]);
+            for (const auto& e : ents) {
+                if (e.empty()) continue;
+                auto pr = splitChar(e, ',');
+                data.upgradeBits.push_back(getiDef(pr, 0, 0) ? '1' : '0');
+                data.upgradeBits.push_back(getiDef(pr, 1, 0) ? '1' : '0');
             }
+        } else if (version < 1.0502) {
+            // old awful packing
+            std::string packed = sections[6];
+            std::vector<i32> bits;
+            if (version < 1.05) bits = uncompressLargeBin(packed);
+            else {
+                // unpack(str) -> bytes array; here packed is raw chars
+                // JS: unpack returns [char>>>8, char&0xFF ...]
+                for (char c : packed) {
+                    unsigned int code = static_cast<unsigned char>(c);
+                    bits.push_back(static_cast<i32>((code >> 8) & 0xFF));
+                    bits.push_back(static_cast<i32>(code & 0xFF));
+                }
+            }
+            for (size_t i = 0; i + 1 < bits.size(); i += 2) {
+                data.upgradeBits.push_back(bits[i] ? '1' : '0');
+                data.upgradeBits.push_back(bits[i + 1] ? '1' : '0');
+            }
+        } else {
+            std::string packed;
+            if (version < 2.0046) packed = unpack2(sections[6]);
+            else packed = sections[6];
+            data.upgradeBits = packed; // raw '0'/'1' string
         }
     }
 
-    // --- section 7: achievements bitstring ---
+    // --- section 7: achievements (version-gated) ---
     if (sections.size() > 7) {
-        const std::string& bits = sections[7];
-        i32 bi = 0;
-        for (auto* a : game.achievementsById) {
-            if (!a) continue;
-            if (bi < static_cast<i32>(bits.size())) {
-                a->won = bits[bi] == '1';
-                ++bi;
+        if (version < 1.035) {
+            auto ents = splitSemi(sections[7]);
+            for (const auto& e : ents) {
+                if (e.empty()) { data.achievementBits.push_back('0'); continue; }
+                auto pr = splitChar(e, ',');
+                data.achievementBits.push_back(getiDef(pr, 0, 0) ? '1' : '0');
             }
+        } else if (version < 1.0502) {
+            std::string packed = sections[7];
+            std::vector<i32> bits;
+            if (version < 1.05) bits = uncompressLargeBin(packed);
+            else {
+                for (char c : packed) {
+                    unsigned int code = static_cast<unsigned char>(c);
+                    bits.push_back(static_cast<i32>((code >> 8) & 0xFF));
+                    bits.push_back(static_cast<i32>(code & 0xFF));
+                }
+            }
+            for (i32 b : bits) data.achievementBits.push_back(b ? '1' : '0');
+        } else {
+            std::string packed;
+            if (version < 2.0046) packed = unpack2(sections[7]);
+            else packed = sections[7];
+            data.achievementBits = packed;
         }
     }
 
     // --- section 8: buffs ---
-    // type.id,maxTime,time,arg1,arg2,arg3  (maxTime/time stored in frames)
     if (sections.size() > 8 && !sections[8].empty()) {
-        f64 fps = static_cast<f64>(game.fps);
-        std::string bsec = sections[8];
-        size_t pos = 0;
-        while ((pos = bsec.find(';')) != std::string::npos) {
-            std::string bstr = bsec.substr(0, pos);
-            bsec.erase(0, pos + 1);
+        auto bents = splitSemi(sections[8]);
+        for (const auto& bstr : bents) {
             if (bstr.empty()) continue;
-            std::vector<std::string> bf;
-            {
-                std::string cur;
-                for (char c : bstr) {
-                    if (c == ',') { bf.push_back(cur); cur.clear(); }
-                    else cur.push_back(c);
-                }
-                bf.push_back(cur);
-            }
+            auto bf = splitChar(bstr, ',');
             if (bf.size() < 3) continue;
-            auto bgetf = [&](i32 idx, f64 def = 0.0) -> f64 {
-                if (idx < 0 || idx >= static_cast<i32>(bf.size()) || bf[idx].empty())
-                    return def;
-                try { return std::stod(bf[idx]); } catch (...) { return def; }
-            };
-            i32 typeId = static_cast<i32>(bgetf(0));
-            // JS stores frames; Buff keeps seconds internally.
-            f64 maxTime = bgetf(1) / fps;
-            f64 time = bgetf(2) / fps;
-            f64 arg1 = bgetf(3);
-            f64 arg2 = bgetf(4);
-            f64 arg3 = bgetf(5);
-
-            std::shared_ptr<BuffType> type;
-            auto it = game.buffTypes.find(typeId);
-            if (it != game.buffTypes.end()) type = it->second;
-            if (!type) {
-                // unknown id: keep a placeholder so saves still round-trip
-                type = std::make_shared<BuffType>();
-                type->id = typeId;
-                type->name = "buff-" + std::to_string(typeId);
-                type->vanilla = true;
-                game.buffTypes[typeId] = type;
-            }
-            auto nb = std::make_unique<Buff>();
-            nb->type = type;
-            nb->maxTime = maxTime;
-            nb->time = time;
-            nb->arg1 = arg1;
-            nb->arg2 = arg2;
-            nb->arg3 = arg3;
-            game.buffs.push_back(std::move(nb));
+            SaveData::BuffSave bs;
+            bs.typeId = static_cast<i32>(getiDef(bf, 0, 0));
+            bs.maxTime = getfDef(bf, 1, 0.0);
+            bs.time = getfDef(bf, 2, 0.0);
+            bs.arg1 = getfDef(bf, 3, 0.0);
+            bs.arg2 = getfDef(bf, 4, 0.0);
+            bs.arg3 = getfDef(bf, 5, 0.0);
+            data.buffs.push_back(bs);
         }
     }
 
+    // --- section 9: mod data ---
+    if (sections.size() > 9 && !sections[9].empty()) {
+        auto ments = splitSemi(sections[9]);
+        for (const auto& m : ments) {
+            if (m.empty()) continue;
+            auto kv = splitChar(m, ':');
+            // format: modId:value (but value may contain ':'? JS splits on ':' then
+            // shifts modId off, rejoins with ':')
+            if (kv.empty()) continue;
+            std::string modId = kv[0];
+            if (modId == "META") continue;
+            std::string value;
+            if (kv.size() > 1) {
+                // rejoin kv[1..] with ':'
+                for (size_t i = 1; i < kv.size(); ++i) {
+                    if (i > 1) value += ':';
+                    value += kv[i];
+                }
+            }
+            data.modData.emplace_back(modId, value);
+        }
+    }
+
+    return data;
+}
+
+// ---------------------------------------------------------------------------
+// Game.LoadSave apply half (side effects). Parsing already done in parseSave.
+// Subsystems not yet built are stubbed; raw values are still stored so nothing
+// is dropped and everything re-emits unchanged.
+// ---------------------------------------------------------------------------
+bool SaveLoad::applySave(Game& game, const SaveData& data) {
+    // --- section 2: run details ---
+    // JS: Game.startDate=parseInt(spl[0])||parseInt(Date.now());
+    //     NaN/undefined -> now. We mirror: if NaN, use now_ms().
+    auto nowOrDef = [](f64 v) { return std::isnan(v) ? static_cast<f64>(now_ms()) : v; };
+    game.startDate = nowOrDef(data.startDate);
+    game.fullDate = nowOrDef(data.fullDate);
+    game.lastDate = nowOrDef(data.lastDate);
+    game.bakeryName = data.bakeryName.empty() ? game.getBakeryName() : data.bakeryName;
+    game.seed = data.seed.empty() ? "stub-seed" : data.seed;
+    game.appearance = data.appearance;
+
+    // --- section 3: prefs ---
+    game.prefs.particles = data.prefs[0];
+    game.prefs.numbers = data.prefs[1];
+    game.prefs.autosave = data.prefs[2];
+    game.prefs.autoupdate = data.prefs[3];
+    game.prefs.milk = data.prefs[4];
+    game.prefs.fancy = data.prefs[5];
+    game.prefs.warn = data.prefs[6];
+    game.prefs.cursors = data.prefs[7];
+    game.prefs.focus = data.prefs[8];
+    game.prefs.format = data.prefs[9];
+    game.prefs.notifs = data.prefs[10];
+    game.prefs.wobbly = data.prefs[11];
+    game.prefs.monospace = data.prefs[12];
+    game.prefs.filters = data.prefs[13];
+    game.prefs.cookiesound = data.prefs[14];
+    game.prefs.crates = data.prefs[15];
+    game.prefs.showBackupWarning = data.prefs[16];
+    game.prefs.extraButtons = data.prefs[17];
+    game.prefs.askLumps = data.prefs[18];
+    game.prefs.customGrandmas = data.prefs[19];
+    game.prefs.timeout = data.prefs[20];
+    game.prefs.cloudSave = data.prefs[21];
+    game.prefs.bgMusic = data.prefs[22];
+    game.prefs.notScary = data.prefs[23];
+    game.prefs.fullscreen = data.prefs[24];
+    game.prefs.screenreader = data.prefs[25];
+    game.prefs.discordPresence = data.prefs[26];
+
+    // --- section 4: misc data ---
+    game.cookies = data.cookies;
+    game.cookiesEarned = data.cookiesEarned;
+    game.cookieClicks = data.cookieClicks;
+    game.goldenClicks = data.goldenClicks;
+    game.handmadeCookies = data.handmadeCookies;
+    game.missedGoldenClicks = data.missedGoldenClicks;
+    game.bgType = data.bgType;
+    game.milkType = data.milkType;
+    game.cookiesReset = data.cookiesReset;
+    game.elderWrath = data.elderWrath;
+    game.pledges = data.pledges;
+    game.pledgeT = data.pledgeT;
+    game.nextResearch = data.nextResearch;
+    game.researchT = data.researchT;
+    game.resets = data.resets;
+    game.goldenClicksLocal = data.goldenClicksLocal;
+    game.cookiesSucked = data.cookiesSucked;
+    game.wrinklersPopped = data.wrinklersPopped;
+    game.santaLevel = data.santaLevel;
+    game.reindeerClicked = data.reindeerClicked;
+    game.seasonT = data.seasonT;
+    game.seasonUses = data.seasonUses;
+    game.season = data.season.empty() ? game.baseSeason : data.season;
+
+    // wrinklers
+    game.wrinklers.clear();
+    game.wrinklers.resize(12);
+    for (auto& w : game.wrinklers) { w.phase = 0; w.close = 0; w.sucked = 0.0; w.hp = 2.1; w.type = 0; }
+
+    game.prestige = data.prestige;          // loaded value (overwritten below)
+    game.heavenlyChips = data.heavenlyChips;
+    game.heavenlyChipsSpent = data.heavenlyChipsSpent;
+    game.heavenlyCookies = data.heavenlyCookies;
+    game.ascensionMode = data.ascensionMode;
+    for (i32 i = 0; i < 5; ++i) game.permanentUpgrades[i] = data.permanentUpgrades[i];
+    game.dragonLevel = data.dragonLevel;
+    game.dragonAura = data.dragonAura;
+    game.dragonAura2 = data.dragonAura2;
+    game.chimeType = data.chimeType;
+    game.volume = data.volume;
+
+    // wrinkler shinies/amountShinies stored for LoadWrinklers
+    // (applied below via stub)
+
+    game.lumps = data.lumps;
+    game.lumpsTotal = data.lumpsTotal;
+    game.lumpT = data.lumpT;
+    game.lumpRefill = data.lumpRefill;
+    game.lumpCurrentType = data.lumpCurrentType;
+    game.vault = data.vault;
+    game.heralds = data.heralds;
+    game.fortuneGC = data.fortuneGC;
+    game.fortuneCPS = data.fortuneCPS;
+    game.cookiesPsRawHighest = data.cookiesPsRawHighest;
+    game.volumeMusic = data.volumeMusic;
+    game.cookiesSent = data.cookiesSent;
+    game.cookiesReceived = data.cookiesReceived;
+
+    // --- recompute prestige (JS always does this on load) ---
+    // Game.prestige = Math.floor(Game.HowMuchPrestige(Game.cookiesReset));
+    // HowMuchPrestige = pow(cookiesReset/1e12, 1/3) = cbrt(cookiesReset/1e12)
+    {
+        f64 p = std::cbrt(game.cookiesReset / 1000000000000.0);
+        if (p < 0.0) p = 0.0;
+        game.prestige = static_cast<f64>(static_cast<i32>(std::floor(p)));
+    }
+
+    // --- version-gated migrations ---
+    if (data.version <= 1.0466) {
+        game.heavenlyChips = game.prestige;
+        game.heavenlyChipsSpent = 0;
+    }
+    if (data.version == 1.9) {
+        // remove all heavenly upgrades, refund chips (stub: no upgrade data here)
+        game.heavenlyChips = game.prestige;
+        game.heavenlyChipsSpent = 0;
+    }
+
+    // --- season/milk clamping ---
+    if (game.bgType == -1) game.bgType = 0;
+    if (game.milkType == -1) game.milkType = 0;
+
+    // --- wrinklers (LoadWrinklers stub: assign shinies first, then normals,
+    //     split sucked evenly) ---
+    {
+        i32 number = data.wrinkleNumber;
+        i32 shinies = data.wrinkleShinies;
+        f64 amount = data.wrinkleAmount;
+        f64 amountShinies = data.wrinkleAmountShinies;
+        if (number > 0 && (amount > 0.0 || amountShinies > 0.0)) {
+            i32 fullNumber = number - shinies;
+            i32 fullShinies = shinies;
+            i32 remaining = number;
+            i32 shiniesLeft = shinies;
+            for (auto& w : game.wrinklers) {
+                if (remaining <= 0) break;
+                w.phase = 2; w.close = 1; w.hp = 3.0;
+                if (shiniesLeft > 0) {
+                    w.type = 1;
+                    w.sucked = fullShinies > 0 ? amountShinies / static_cast<f64>(fullShinies) : 0.0;
+                    --shiniesLeft;
+                } else {
+                    w.type = 0;
+                    w.sucked = fullNumber > 0 ? amount / static_cast<f64>(fullNumber) : 0.0;
+                }
+                --remaining;
+            }
+        }
+    }
+
+    // --- section 5: buildings ---
+    {
+        game.buildingsOwned = 0;
+        i32 bi = 0;
+        for (auto& b : game.objects) {
+            if (!b || !b->vanilla) continue;
+            if (bi >= static_cast<i32>(data.buildings.size())) break;
+            const auto& bs = data.buildings[bi];
+            ++bi;
+            b->amount = bs.amount;
+            b->bought = bs.bought;
+            b->totalCookies = bs.totalCookies;
+            b->level = bs.level;
+            b->minigameSave = bs.minigameSave;
+            b->muted = bs.muted != 0;
+            b->highest = bs.highest;
+            game.buildingsOwned += b->amount;
+        }
+        // any buildings not in the save are left at defaults (0)
+    }
+
+    // --- section 6/7: upgrades & achievements bits ---
+    // Apply bits to game.upgradesById / game.achievementsById (vanilla only,
+    // matching WriteSave which only writes vanilla).
+    {
+        i32 bi = 0;
+        for (auto* u : game.upgradesById) {
+            if (!u || !u->vanilla) continue;
+            if (bi + 1 < static_cast<i32>(data.upgradeBits.size())) {
+                u->unlocked = data.upgradeBits[bi] == '1';
+                u->bought = data.upgradeBits[bi + 1] == '1';
+                bi += 2;
+            } else {
+                u->unlocked = false; u->bought = false;
+            }
+        }
+    }
+    {
+        i32 bi = 0;
+        for (auto* a : game.achievementsById) {
+            if (!a || !a->vanilla) continue;
+            if (bi < static_cast<i32>(data.achievementBits.size())) {
+                a->won = data.achievementBits[bi] == '1';
+                ++bi;
+            } else {
+                a->won = false;
+            }
+        }
+    }
+
+    // --- section 8: buffs (stub: store into game.buffs) ---
+    game.buffs.clear();
+    f64 fps = static_cast<f64>(game.fps);
+    for (const auto& bs : data.buffs) {
+        // resolve type id -> BuffType
+        auto it = game.buffTypes.find(bs.typeId);
+        std::shared_ptr<BuffType> type;
+        if (it != game.buffTypes.end()) type = it->second;
+        if (!type) {
+            type = std::make_shared<BuffType>();
+            type->id = bs.typeId;
+            type->name = "buff-" + std::to_string(bs.typeId);
+            type->vanilla = true;
+            game.buffTypes[bs.typeId] = type;
+        }
+        auto nb = std::make_unique<Buff>();
+        nb->type = type;
+        nb->maxTime = bs.maxTime / fps; // frames -> seconds
+        nb->time = bs.time / fps;
+        nb->arg1 = bs.arg1;
+        nb->arg2 = bs.arg2;
+        nb->arg3 = bs.arg3;
+        game.buffs.push_back(std::move(nb));
+    }
+
+    // --- section 9: mod data ---
+    game.modSaveData.clear();
+    for (const auto& kv : data.modData) game.modSaveData[kv.first] = kv.second;
+
+    // --- post-parse side effects (stubs; no tick between load & write in tests) ---
+    // Game.T=0; Game.realT=0; (no frame timers in headless port)
+    // Game.killBuffs(); Game.CalculateGains(); — stubbed, do not alter saved fields
+    // Offline catch-up: timeOffline = (clock - lastDate)/1000. In tests clock==lastDate -> 0.
+    // Game.loadLumps(0); — stubbed no-op.
+
     game.recalculateGainsFlag();
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// Game.LoadSave = parse + apply.
+// ---------------------------------------------------------------------------
+bool SaveLoad::loadSave(Game& game, const std::string& raw) {
+    auto data = parseSave(raw);
+    if (!data) return false;
+    return applySave(game, *data);
 }

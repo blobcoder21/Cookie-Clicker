@@ -1,37 +1,101 @@
 # Progress Log — Cookie Clicker C++ Port
 
-## Session Summary: Ascension and Prestige Core (v2.021)
+## Current focus: SaveLoad — faithful 1:1 port of Cookie Clicker 2.058 save code
 
-### Completed
-- **Prestige system**: `prestige = floor(cuberoot(cookiesReset / 1e12))`; one heavenly chip per newly earned prestige level; tracks `cookiesReset`, `prestige`, `heavenlyChips`, `heavenlyChipsSpent` independently; no duplicate rewards; zero-prestige ascensions handled.
-- **Ascension lifecycle**: `Game::reincarnate()` → `EarnHeavenlyChips()` → `Reset(false)` → `applyPermanentUpgrades()`. Preserves achievements, sugar lumps, building levels, heavenly upgrades, Garden seed unlocks; resets run-specific state (cookies, buildings amounts, non-prestige upgrades, wrinklers, timers). No partial corruption possible — each field assigned independently.
-- **Heavenly upgrade dataset**: complete pool=`prestige` dataset from v2.021 `main.js` presets — all upgrades with IDs, costs, parents (prerequisites), `showIf` visibility conditions, `noPerm` flags. Five heavenly multiplier unlocks (Heavenly chip secret +5%, cookie stand +20%, bakery +50%, confectionery +75%, key +100%) with correct cumulative contributions. Price rounding via `ceil`; prestige pool exempt from ordinary cookie discounts.
-- **Permanent upgrade slots**: 5 slots (`-1` = empty). `assignPermanentSlot()` selects eligible ordinary upgrades (not prestige/noPerm, must be bought, no duplicates). Selections preserved through ascensions via save/load. `applyPermanentUpgrades()` validates slots on new runs.
-- **Prestige CPS**: `GetHeavenlyMultiplier()` implements all 5 multipliers + Lucky digit/number/payout + Dragon God aura + Creation god. Integrated into `calculateGains()` as `prestige * 0.01 * heavenlyPower * GetHeavenlyMultiplier()`. PseudoCookie upgrades (Heavenly cookies +10%, Wrinkly cookies +10%, Sugar crystal cookies +5% + per-level) applied as CPS multipliers.
-- **Persistence**: SaveLoad extended with `ascensions` field (section 4, field 51, append-only for backwards compatibility). Prestige recomputed from `cookiesReset` on load (mirrors JS). Full save/load round-trip verified. Old saves without `ascensions` load correctly (defaults to 0).
-- **Statistics**: `ascensions` tracked separately from `prestige` and `resets`. Zero-prestige ascensions increment `ascensions` only; prestige-gaining ascensions increment both.
-- **Integration**: wired into `Game::logic()` (periodic unlock checks), `calculateGains()` (CPS), `SaveLoad`, minigame reset on ascension. Core remains UI/platform-independent.
+### Source of truth
+- `ref/main_2058.js` — the real Cookie Clicker 2.058 main.js (downloaded from
+  https://orteil.dashnet.org/cookieclicker/main.js; byte-identical to the repo
+  copy). `Game.WriteSave` (line 2882) and `Game.LoadSave` (line 3124) ported
+  line-by-line, original names and order kept in comments.
+- `tests/saves/v2058.txt` and `tests/saves/v1_0393.txt` — fixtures in the outer
+  storage encoding (`escape(utf8_to_b64(raw + "!END!"))`).
 
-### Files Modified
-- `cpp/Game.h` — added `ascensions`, `Reset()`, `reincarnate()`, `EarnHeavenlyChips()`, `GetHeavenlyMultiplier()`, `assignPermanentSlot()`, `applyPermanentUpgrades()`, `unlockHeavenlyChain()`, `unlockAvailablePrestigeUpgrades()`; changed `permanentUpgrades` init to `-1`
-- `cpp/Game.cpp` — full implementations of all above; heavenly upgrade dataset (~80 pool=`prestige` upgrades); pseudoCookie CPS effects; unlock chain logic
-- `cpp/Upgrade.h` — added `pool`, `parents`, `showIf`, `noPerm` fields
-- `cpp/SaveLoad.cpp` — added `ascensions` field (write + load), prestige recomputation on load
-- `cpp/SaveLoad.h` — documented `ascensions` field in save format
+### Ported (SaveLoad)
+**Game.WriteSave** (all sections, original order, JS number formatting):
+- section 0: `Game.version`; section 1: reserved empty.
+- section 2: `startDate;fullDate;lastDate;bakeryName;seed;appearance|`.
+- section 3: 27-bit prefs bitstring (pack3 = identity).
+- section 4: 55 misc fields (0..54). `.toString()` floats use shortest
+  round-trip (`jsNumberToString`); `parseInt(Math.floor(x))` fields use floor;
+  `parseInt(x)` fields (heralds/fortuneGC/fortuneCPS) use truncate.
+- section 5: buildings `amount,bought,floor(totalCookies),level,minigameSave,muted,highest;`.
+- section 6: upgrades bitstring (unlocked,bought pairs, vanilla only).
+- section 7: achievements bitstring (won, vanilla only).
+- section 8: buffs `type.id,maxTime,time,arg1,arg2,arg3;` (frames).
+- section 9: mod data (`Game.saveModData()` stubbed → "").
+- `Game.lastDate = parseInt(Game.time)` at entry (injected-clock behaviour).
+- **Number formatting**: new `cpp/jsnum.h` with `jsNumberToString()` matching JS
+  `Number.prototype.toString()` exactly (shortest round-trip; exponential iff
+  `x < 1e-6` or `x >= 1e21`; plain signed exponent). Verified against Node on
+  5044 values including MAX_VALUE/MIN_VALUE/MAX_SAFE_INTEGER — 0 mismatches.
+- **Outer encoding**: `encodeForStorage`/`decodeFromStorage` match JS
+  `escape(utf8_to_b64(raw)+"!END!")`; terminator + whitespace stripped before
+  decode. Verified byte-identical to JS type-1 output.
 
-### Build & Test
-- `cmake --build build -j` succeeds
-- `cookie_clicker_logic_check` passes (core compiles with logic headers only)
-- `timeout 3 ./build/cookie_clicker` exits 124 (expected, no crash)
-- 14 deterministic platform-free tests pass: prestige thresholds, multiple levels gained, chip accounting, heavenly upgrade purchases, prerequisites, visibility (showIf), CPS multipliers, repeated ascension, permanent slots, reset preservation, minigame state, save/load round-trip, save/load backwards compatibility, ascension statistics
+**Game.LoadSave** (every version-gated branch, parsed separately from side effects):
+- `parseSave()` (platform-free, no Game/UI): returns `SaveData` or nullopt on
+  truncated/garbage/wrong-version input; game untouched on failure.
+- `applySave()`: side effects; stubs where a subsystem isn't built, but raw
+  values still stored and re-emitted unchanged.
+- Version-gated prefs/upgrades/achievements unpacking:
+  - `<1.0503` prefs: `split('')`; `1.0503–2.0046`: `unpack2()`; `>=2.0046`: `split('')`.
+  - `<1.035` old non-binary; `1.035–1.0502` old awful packing
+    (`UncompressLargeBin` for `<1.05`, `unpack` for `1.05–1.0502`);
+    `>=1.0502`: `unpack2()`/`split('')`.
+  - `unpack`, `unpack2`, `UncompressBin`, `UncompressLargeBin` ported.
+- Prestige always recomputed: `floor(cbrt(cookiesReset/1e12))`.
+- Version migrations (`<=1.0466` → heavenlyChips=prestige; `==1.9` → refund).
+- Season/milk clamping, wrinkler LoadWrinklers semantics (shinies first),
+  buildings/upgrades/achievements/buffs/mod-data application.
+- Post-parse side effects (CalculateGains, offline catch-up, loadLumps,
+  killShimmers, etc.) stubbed; no tick between load & write in tests, so saved
+  fields round-trip byte-identically.
 
-### Porting Target
-- **Target version: v2.021** (established from `main.js` `VERSION=2.021`, `Game.h` `VERSION = 2.021`, PORTING_PLAN §1). HANDOFF.md "v2.058" references are UI layout screenshots only, not game logic. teemo.dev cross-check not applicable (target ≠ 2.058; no external access).
+**Port-only data removed from the real string**: the old `ascensions` field at
+stats field 51 collided with the real field 51 (`cookiesPsRawHighest`). It is no
+longer serialized; `Game.ascensions` is kept as port-only sidecar state.
+Field 51 now writes `cookiesPsRawHighest`.
 
-### Active
-- None
+### Game data model changes
+- `Game::VERSION = 2.058`.
+- Added: `appearance`, `ascensionMode`, `cookiesPsRawHighest`, `volumeMusic`,
+  `cookiesSent`, `cookiesReceived`, prefs `cloudSave/bgMusic/notScary/fullscreen/screenreader/discordPresence`.
+- `Building`: added `minigameSave` (raw string, re-emitted on write) and
+  `highest` (building entry field 6).
+- `Game.modSaveData` map added.
 
-### Blocked
-- Sounds: SDL2_mixer not installed (`Audio.cpp` no-op stub)
-- Many heavenly upgrade effects (angels, kittens, synergies, seasons, sugar lumps maturation) are registered as data but their specific mechanics are stubbed — consistent with existing stubbed subsystems
-- UI for ascend tree, heavenly upgrade purchasing, permanent slot selection (deferred per non-goals)
+### Stubbed (parse + store + re-emit, no simulation)
+Minigames (Garden/Grimoire/Pantheon/Dungeons save strings), wrinkler/shimmer
+simulation, buff effects, seasons, dragons, lumps maturation, CalculateGains,
+offline catch-up, loadLumps, mod effects, YouCustomizer (appearance echoed),
+saveModData. These are parsed and re-emitted unchanged so nothing is dropped.
+
+### Verification
+- `cpp/SaveLoad.cpp` + logic sources compile clean (build + `cookie_clicker_logic_check`).
+- `timeout 3 ./build/cookie_clicker` → exit 124 (expected).
+- Golden test vs real `ref/main_2058.js` under Node:
+  - C++ `writeSave(state)` == JS `WriteSave(2)(state)` — byte-identical (381 B).
+  - C++ `encodeForStorage(raw)` == JS `escape(b64(raw+"!END!"))` — byte-identical (517 B).
+  - C++ `loadSave(JS raw)` → `writeSave` == JS raw — byte-identical.
+- `tests/saves/v2058.txt`: decode+load+write reproduces the decoded raw.
+- `tests/saves/v1_0393.txt`: legacy save (UncompressLargeBin upgrades/achievements,
+  no appearance field) loads without crashing, converts to 2.058 form, and that
+  output is idempotent on reload.
+- Truncated/garbage/wrong-version input → `parseSave` returns nullopt, game
+  untouched, no crash.
+
+### Not yet reproduced exactly
+- Nothing known: every branch in `WriteSave`/`LoadSave` was ported. The only
+  deviations are deliberate stubs of not-yet-built subsystems (minigame
+  simulation, buff effects, etc.), which still parse/store/re-emit their raw
+  values.
+
+### Files modified
+- `cpp/SaveLoad.h` — `SaveData` struct; `parseSave`/`applySave` separation.
+- `cpp/SaveLoad.cpp` — full v2.058 WriteSave/LoadSave port + `jsnum.h` formatting.
+- `cpp/jsnum.h` (new) — `jsNumberToString`/`jsParseFloat`/`jsParseInt`.
+- `cpp/Game.h` — version 2.058 + missing fields.
+- `cpp/Building.h` — `minigameSave`, `highest`.
+- `cpp/CMakeLists.txt` — added `jsnum.h`.
+- `tests/saves/v2058.txt`, `tests/saves/v1_0393.txt` (new fixtures).
+- `ref/main_2058.js` (new source of truth).

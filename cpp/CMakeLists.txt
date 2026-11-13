@@ -64,6 +64,7 @@ set(SOURCES
 
 set(HEADERS
     Types.h
+    jsnum.h
     Game.h
     Economy.h
     Building.h
