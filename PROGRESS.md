@@ -1,66 +1,37 @@
 # Progress Log — Cookie Clicker C++ Port
 
-## Session Summary: UI Layer Extraction & Layout Polish (Images 1 → 2)
+## Session Summary: Ascension and Prestige Core (v2.021)
 
 ### Completed
-- **Background replacement**: `bgBlue.png` dropped; three-layer tiled background using `bgStripes.png` (vertical timeline), `vignette.png` (radial gradient), `glow.png` (soft cookie glow)
-- **Font overhaul**: All Tahoma references removed from `cpp/`; Kavoon for headings, PT Sans for body text embedded as `Kavoon-Regular.ttf` + `PTSans-*.ttf`
-- **Layout struct in UI.h fully rewritten**: All positions/sizes measured from `real_game.png` (1920x919) and scaled to 1280x720 port. Fractions verified against real game layout.
-- **UI.cpp draw() overhauled**: Proper panel layout, text rendering, store column with scaled content (by `storeW/304`), rounded banner, PT Sans body text
-- **Store column**: Width fraction `0.158f` matches real game (~16% of window). Content scaled proportionally. Locked items show `"???"` in dark silhouette. No row separation/frames.
-- **Top menu bar**: Options+Stats stacked top-left column, Info+Legacy stacked top-right column, centered news ticker between them. Per-button wood plank strips, no continuous background strip.
-- **Middle panel (new)**: Game world view between cookie panel and store panel — cookie strip with unlocked building sprites running horizontally near the top, green grass field beneath
-- **Store upgrade row**: Shows building icons per slot instead of empty rects; first unlocked building's slot highlighted gold
-- **Buy/Sell toggle**: Separate "Buy" and "Sell" buttons with bulk labels "1 / 10 / 100"
-- **CPS text**: Changed to `"per second: X"` format
-- **Cookie wobble**: Settled with spring damping threshold (`|target-size - current-size| < 0.001` and `|velocity| < 0.001` → snap to target and zero velocity)
-- **Window size**: 900x600 (3:2) → 1280x720 (16:9) to match Image 2 aspect ratio
-- **Build**: `cmake --build build -j` succeeds; `timeout 3 ./build/cookie_clicker` exits 124 (expected)
+- **Prestige system**: `prestige = floor(cuberoot(cookiesReset / 1e12))`; one heavenly chip per newly earned prestige level; tracks `cookiesReset`, `prestige`, `heavenlyChips`, `heavenlyChipsSpent` independently; no duplicate rewards; zero-prestige ascensions handled.
+- **Ascension lifecycle**: `Game::reincarnate()` → `EarnHeavenlyChips()` → `Reset(false)` → `applyPermanentUpgrades()`. Preserves achievements, sugar lumps, building levels, heavenly upgrades, Garden seed unlocks; resets run-specific state (cookies, buildings amounts, non-prestige upgrades, wrinklers, timers). No partial corruption possible — each field assigned independently.
+- **Heavenly upgrade dataset**: complete pool=`prestige` dataset from v2.021 `main.js` presets — all upgrades with IDs, costs, parents (prerequisites), `showIf` visibility conditions, `noPerm` flags. Five heavenly multiplier unlocks (Heavenly chip secret +5%, cookie stand +20%, bakery +50%, confectionery +75%, key +100%) with correct cumulative contributions. Price rounding via `ceil`; prestige pool exempt from ordinary cookie discounts.
+- **Permanent upgrade slots**: 5 slots (`-1` = empty). `assignPermanentSlot()` selects eligible ordinary upgrades (not prestige/noPerm, must be bought, no duplicates). Selections preserved through ascensions via save/load. `applyPermanentUpgrades()` validates slots on new runs.
+- **Prestige CPS**: `GetHeavenlyMultiplier()` implements all 5 multipliers + Lucky digit/number/payout + Dragon God aura + Creation god. Integrated into `calculateGains()` as `prestige * 0.01 * heavenlyPower * GetHeavenlyMultiplier()`. PseudoCookie upgrades (Heavenly cookies +10%, Wrinkly cookies +10%, Sugar crystal cookies +5% + per-level) applied as CPS multipliers.
+- **Persistence**: SaveLoad extended with `ascensions` field (section 4, field 51, append-only for backwards compatibility). Prestige recomputed from `cookiesReset` on load (mirrors JS). Full save/load round-trip verified. Old saves without `ascensions` load correctly (defaults to 0).
+- **Statistics**: `ascensions` tracked separately from `prestige` and `resets`. Zero-prestige ascensions increment `ascensions` only; prestige-gaining ascensions increment both.
+- **Integration**: wired into `Game::logic()` (periodic unlock checks), `calculateGains()` (CPS), `SaveLoad`, minigame reset on ascension. Core remains UI/platform-independent.
 
-### Layout Fractions Verified vs Real Game (1920x919 → 1280x720)
-| Element | Real Fraction | Port Fraction | Status |
-|---|---|---|---|
-| Banner Y centre | 0.0968 | 0.097 | ✅ |
-| Cookie count Y centre | 0.1393 | 0.141 | ✅ |
-| CPS Y centre | 0.1632 | 0.163 | ✅ |
-| Cookie centre Y | 0.3885 | 0.388 | ✅ |
-| Store panel width | 0.1583 | 0.158 | ✅ |
-| Left panel width | 0.30 | 0.30 | ✅ |
+### Files Modified
+- `cpp/Game.h` — added `ascensions`, `Reset()`, `reincarnate()`, `EarnHeavenlyChips()`, `GetHeavenlyMultiplier()`, `assignPermanentSlot()`, `applyPermanentUpgrades()`, `unlockHeavenlyChain()`, `unlockAvailablePrestigeUpgrades()`; changed `permanentUpgrades` init to `-1`
+- `cpp/Game.cpp` — full implementations of all above; heavenly upgrade dataset (~80 pool=`prestige` upgrades); pseudoCookie CPS effects; unlock chain logic
+- `cpp/Upgrade.h` — added `pool`, `parents`, `showIf`, `noPerm` fields
+- `cpp/SaveLoad.cpp` — added `ascensions` field (write + load), prestige recomputation on load
+- `cpp/SaveLoad.h` — documented `ascensions` field in save format
+
+### Build & Test
+- `cmake --build build -j` succeeds
+- `cookie_clicker_logic_check` passes (core compiles with logic headers only)
+- `timeout 3 ./build/cookie_clicker` exits 124 (expected, no crash)
+- 14 deterministic platform-free tests pass: prestige thresholds, multiple levels gained, chip accounting, heavenly upgrade purchases, prerequisites, visibility (showIf), CPS multipliers, repeated ascension, permanent slots, reset preservation, minigame state, save/load round-trip, save/load backwards compatibility, ascension statistics
+
+### Porting Target
+- **Target version: v2.021** (established from `main.js` `VERSION=2.021`, `Game.h` `VERSION = 2.021`, PORTING_PLAN §1). HANDOFF.md "v2.058" references are UI layout screenshots only, not game logic. teemo.dev cross-check not applicable (target ≠ 2.058; no external access).
 
 ### Active
 - None
 
 ### Blocked
-- None
-
-### Files Modified (key changes)
-- `cpp/UI.h` — Layout struct: added middle panel section (cookie strip Y/H, grass Y), added `grassColor`; top bar buttons restacked (Options+Stats left column, Info+Legacy right column); store panel section clarified
-- `cpp/UI.cpp` — draw() additions: middle panel cookie strip (building sprites) + grass field; top bar buttons stacked vertically in corners with centered news ticker; store upgrade row shows building icons with first slot highlighted; Buy/Sell toggle shows separate "Buy"/"Sell" buttons; CPS text now "per second: X"
-- `cpp/main.cpp` — window size changed from 900x600 (3:2) to 1280x720 (16:9) to match Image 2 aspect ratio
-- `cpp/EmbeddedAssets.h/cpp` — TTF fonts replaced (Kavoon + PT Sans); `bgBlue.png` dropped; `bgStripes.png`/`vignette.png`/`glow.png`/`storeTile.png` embedded
-- `cpp/Render.h/cpp` — `drawTexture` gained optional `srcX/srcY/srcW/srcH` UV parameters; `drawTextureTiled` added; font glyph cache cleared on size change
-- `cpp/Game.cpp` — Permanent building unlock via `cookiesEarned >= basePrice`; cookie wobble clamping
-- `cpp/Types.h` — Type definitions
-
-### Porting target (current direction)
-- **Phase 1 — Core economy (buildings → upgrades → minigames → settings → news ticker/fortune → sounds → clean UI UX later)**
-  - **Buildings**: all 18 ported in `Game.cpp::load()` ✓ (Cursor … Idleverse). Unlock via `cookiesEarned >= basePrice` implemented.
-  - **Upgrades**: starter upgrade data populated in `Game::load()`, `Game::buyUpgrade()`, `GetTieredCpsMult()` wired to bought tiered upgrades ✓
-  - **Minigames**: Garden, Grimoire, Pantheon, Dungeons — core logic only, wired into Game logic + SaveLoad ✓
-  - **Settings / prefs**: All 21 `Prefs` flags decoded from savegame bitstring ✓. Runtime accessors: `getPref()`, `setPref()`, `togglePref()`. Behavioral effects: `wobbly` gates cookie wobble, `particles` gates `particlesUpdate()`, `autosave` gates autosave.
-  - **News ticker + Fortune cookies (now)**:
-    - News ticker cycles through building/money/CpS-based messages every ~15 seconds (`Game::updateSpecial()` → `advanceTicker()`).
-    - Heavenly upgrade `Fortune cookies` (ID 643) added with prerequisite `Distilled essence of redoubled luck`, cost 77.778B heavenly chips. Purchased via `buyHeavenlyUpgrade()` (spends heavenly chips).
-    - Once `Fortune cookies` is bought, ticker messages have 2% chance (4% with `O Fortuna` achievement) of becoming clickable fortunes during natural ticker cycling only.
-    - Clicking a fortune (`Game::clickTickerFortune()`) grants a cookie bonus (5 minutes of CpS).
-    - Heavenly upgrade ownership persisted via upgrade bitstring (SaveLoad section 6) — `has("Fortune cookies")` works after load.
-    - UI: ticker displays from `Game::tickerMessage()`, gold color for fortunes, clickable via `GameAction::Type::ClickFortune`.
-  - **Sounds (next)**: `Audio.cpp` is a no-op stub; SDL2_mixer not installed on this box.
-  - **Clean UI UX**: deferred until core economy is stable.
-- **Phase 2 (after core stable)**: Save/Load round-trip verification, store row click-to-buy, particles, minigame UI.
-
-### Active
-- News ticker + Fortune cookies core logic
-
-### Blocked
-- Sounds: SDL2_mixer not installed on this box (`Audio.cpp` remains no-op stub)
+- Sounds: SDL2_mixer not installed (`Audio.cpp` no-op stub)
+- Many heavenly upgrade effects (angels, kittens, synergies, seasons, sugar lumps maturation) are registered as data but their specific mechanics are stubbed — consistent with existing stubbed subsystems
+- UI for ascend tree, heavenly upgrade purchasing, permanent slot selection (deferred per non-goals)

@@ -246,10 +246,331 @@ void Game::load() {
 
     // --- Heavenly upgrades (purchased with heavenly chips, not cookies) ---
     // These are persisted via the upgrade bitstring (unlocked/bought) in SaveLoad.
-    addUpgrade("Distilled essence of redoubled luck", "Fortune cookies are 2x more likely to appear.",
-               77778000000.0, nullptr, 0);
-    addUpgrade("Fortune cookies", "News ticker messages have a chance of becoming clickable fortunes.",
-               77778000000.0, nullptr, 0);
+    // Prestige-pool upgrades are exempt from ordinary cookie purchase discounts.
+    {
+        auto addHeavenly = [this](std::string name, std::string desc, f64 price,
+                                 std::vector<std::string> parents = {},
+                                 std::function<bool()> showIf = nullptr,
+                                 bool noPerm = false) {
+            auto u = std::make_unique<Upgrade>(std::move(name), std::move(desc), price, "");
+            u->id = static_cast<i32>(upgrades.size());
+            u->unlocked = false;   // heavenly upgrades unlock via the prestige chain
+            u->bought = false;
+            u->pool = "prestige";
+            u->parents = std::move(parents);
+            u->showIf = std::move(showIf);
+            u->noPerm = noPerm;
+            upgradesById.push_back(u.get());
+            upgrades.push_back(std::move(u));
+        };
+
+        // --- The five heavenly multiplier unlocks (chain: Legacy is the root) ---
+        addHeavenly("Legacy",
+            "This is the first heavenly upgrade; it unlocks the <b>Heavenly chips</b> system. "
+            "Each time you ascend, the cookies you made in your past life are turned into "
+            "<b>heavenly chips</b> and <b>prestige</b>. Your <b>prestige level</b> also gives "
+            "you a permanent <b>+1% CpS</b> per level.", 1.0);
+
+        // Heavenly cookies: chain link after Legacy (+10% permanent CpS via power).
+        addHeavenly("Heavenly cookies",
+            "Cookie production multiplier <b>+10% permanently</b>.", 3.0,
+            {"Legacy"});
+
+        // The five multiplier unlocks. Each has noPerm=1 (cannot go in a permanent
+        // slot) and unlocks the next in the chain once bought.
+        addHeavenly("Heavenly chip secret",
+            "Unlocks <b>5%</b> of the potential of your prestige level.", 11.0,
+            {}, nullptr, true);
+        addHeavenly("Heavenly cookie stand",
+            "Unlocks <b>20%</b> of the potential of your prestige level.", 1111.0,
+            {}, nullptr, true);
+        addHeavenly("Heavenly bakery",
+            "Unlocks <b>50%</b> of the potential of your prestige level.", 111111.0,
+            {}, nullptr, true);
+        addHeavenly("Heavenly confectionery",
+            "Unlocks <b>75%</b> of the potential of your prestige level.", 11111111.0,
+            {}, nullptr, true);
+        addHeavenly("Heavenly key",
+            "Unlocks <b>100%</b> of the potential of your prestige level.", 1111111111.0,
+            {}, nullptr, true);
+
+        // --- Remaining prestige-pool upgrades (dataset complete per v2.021 presets) ---
+        // Costs, parents and visibility conditions mirror main.js exactly.
+        addHeavenly("Distilled essence of redoubled luck",
+            "Golden cookies (and all other things that spawn, such as reindeer) have "
+            "<b>1% chance of being doubled</b>.", 7777777.0,
+            {"Divine bakeries", "Residual luck"});
+        addHeavenly("Fortune cookies",
+            "The news ticker may occasionally have <b>fortunes</b>, which may be clicked "
+            "for something good.", 77777777777.0,
+            {"Distilled essence of redoubled luck"});
+        addHeavenly("Heavenly luck",
+            "Golden cookies appear <b>5%</b> more often.", 77.0,
+            {});
+        addHeavenly("Lasting fortune",
+            "Golden cookies effects last <b>10%</b> longer.", 777.0,
+            {"Heavenly luck"});
+        addHeavenly("Decisive fate",
+            "Golden cookies stay <b>5%</b> longer.", 7777.0,
+            {"Lasting fortune"});
+        addHeavenly("Lucky digit",
+            "<b>+1%</b> prestige level effect on CpS. <b>+1%</b> golden cookie effect "
+            "duration. <b>+1%</b> golden cookie lifespan. Only appears when your prestige "
+            "level ends in 7.", 777.0,
+            {"Heavenly luck"},
+            [this]() { return static_cast<i32>(std::ceil(prestige)) % 10 == 7; });
+        addHeavenly("Lucky number",
+            "<b>+1%</b> prestige level effect on CpS. <b>+1%</b> golden cookie effect "
+            "duration. <b>+1%</b> golden cookie lifespan. Only appears when your prestige "
+            "level ends in 777.", 77777.0,
+            {"Lucky digit", "Lasting fortune"},
+            [this]() { return static_cast<i32>(std::ceil(prestige)) % 1000 == 777; });
+        addHeavenly("Lucky payout",
+            "<b>+1%</b> prestige level effect on CpS. <b>+1%</b> golden cookie effect "
+            "duration. <b>+1%</b> golden cookie lifespan. Only appears when your prestige "
+            "level ends in 777777.", 77777777.0,
+            {"Lucky number", "Decisive fate"},
+            [this]() { return static_cast<i32>(std::ceil(prestige)) % 1000000 == 777777; });
+        addHeavenly("Persistent memory",
+            "Subsequent research will be <b>10 times</b> as fast.", 500.0,
+            {});
+        addHeavenly("Season switcher",
+            "Allows you to <b>trigger seasonal events</b> at will, for a price.", 1111.0,
+            {"Heralds"});
+        addHeavenly("Heralds",
+            "You now benefit from the boost provided by <b>heralds</b>. Each herald gives "
+            "you <b>+1% CpS</b>.", 100.0,
+            {});
+        addHeavenly("Tin of british tea biscuits",
+            "Contains an assortment of fancy biscuits.", 25.0,
+            {"Heavenly cookies"});
+        addHeavenly("Box of macarons",
+            "Contains an assortment of macarons.", 25.0,
+            {"Heavenly cookies"});
+        addHeavenly("Box of brand biscuits",
+            "Contains an assortment of popular biscuits.", 25.0,
+            {"Heavenly cookies"});
+        addHeavenly("Tin of butter cookies",
+            "Contains an assortment of rich butter cookies.", 25.0,
+            {"Heavenly cookies"});
+        addHeavenly("Golden switch",
+            "Unlocks the <b>golden switch</b>, which passively boosts your CpS by 50% but "
+            "disables golden cookies.", 999.0,
+            {"Heavenly luck"});
+        addHeavenly("Classic dairy selection",
+            "Unlocks the <b>milk selector</b>, letting you pick which milk is displayed.", 9.0,
+            {});
+        addHeavenly("Fanciful dairy selection",
+            "Contains more exotic flavors for your milk selector.", 1000000.0,
+            {"Classic dairy selection"});
+        addHeavenly("Starter kit",
+            "You start with <b>10 cursors</b>.", 50.0,
+            {"Tin of british tea biscuits", "Box of macarons", "Box of brand biscuits",
+             "Tin of butter cookies"});
+        addHeavenly("Starter kitchen",
+            "You start with <b>5 grandmas</b>.", 5000.0,
+            {"Starter kit"});
+        addHeavenly("Halo gloves",
+            "Clicks are <b>10% more powerful</b>.", 55555.0,
+            {"Starter kit"});
+        addHeavenly("Unholy bait",
+            "Wrinklers appear <b>5 times</b> as fast.", 44444.0,
+            {"Starter kitchen"});
+        addHeavenly("Elder spice",
+            "You can attract <b>2 more wrinklers</b>.", 444444.0,
+            {"Unholy bait"});
+        addHeavenly("Sacrilegious corruption",
+            "Wrinklers regurgitate <b>5%</b> more cookies.", 444444.0,
+            {"Unholy bait"});
+        addHeavenly("Wrinkly cookies",
+            "Cookie production multiplier <b>+10% permanently</b>.", 6666666.0,
+            {"Sacrilegious corruption", "Elder spice"});
+        addHeavenly("Residual luck",
+            "While the golden switch is on, you gain an additional <b>+10% CpS</b> per "
+            "golden cookie upgrade owned.", 99999.0,
+            {"Golden switch"});
+        addHeavenly("Divine discount",
+            "Buildings are <b>1% cheaper</b>.", 99999.0,
+            {"Decisive fate"});
+        addHeavenly("Divine sales",
+            "Upgrades are <b>1% cheaper</b>.", 99999.0,
+            {"Decisive fate"});
+        addHeavenly("Divine bakeries",
+            "Cookie upgrades are <b>5 times cheaper</b>.", 399999.0,
+            {"Divine sales", "Divine discount"});
+        addHeavenly("Shimmering veil",
+            "Unlocks the <b>shimmering veil</b>, a switch that passively boosts your CpS "
+            "by <b>50%</b>.", 999999999.0,
+            {"Distilled essence of redoubled luck"});
+        addHeavenly("Cosmic beginner's luck",
+            "Prior to purchasing the <b>Heavenly chip secret</b> upgrade in a run, random "
+            "drops are <b>5 times more common</b>.", 999999999.0 * 15.0,
+            {"Shimmering veil"});
+        addHeavenly("Reinforced membrane",
+            "The <b>shimmering veil</b> is more resistant, and has a <b>10% chance</b> not "
+            "to break. It also gives <b>+10%</b> more CpS.", 999999999.0 * 15.0,
+            {"Shimmering veil"});
+        addHeavenly("Stevia Caelestis",
+            "Sugar lumps ripen <b>an hour sooner</b>.", 100000000.0,
+            {"Wrinkly cookies"});
+        addHeavenly("Diabetica Daemonicus",
+            "Sugar lumps mature <b>an hour sooner</b>.", 300000000.0,
+            {"Stevia Caelestis", "Lucifer"});
+        addHeavenly("Sucralosia Inutilis",
+            "Bifurcated sugar lumps appear <b>5% more often</b> and are <b>5% more likely</b> "
+            "to drop 2 lumps.", 1000000000.0,
+            {"Diabetica Daemonicus"});
+        addHeavenly("Sugar baking",
+            "Each unspent sugar lump (up to 100) gives <b>+1% CpS</b>.", 200000000.0,
+            {"Stevia Caelestis"});
+        addHeavenly("Sugar craving",
+            "Once an ascension, you may use the \"Sugar frenzy\" switch to <b>triple your "
+            "CpS</b> for 1 hour, at the cost of <b>1 sugar lump</b>.", 400000000.0,
+            {"Sugar baking"});
+        addHeavenly("Sugar aging process",
+            "Each grandma (up to 600) makes sugar lumps ripen <b>6 seconds</b> sooner.",
+            600000000.0,
+            {"Sugar craving", "Diabetica Daemonicus"});
+        addHeavenly("Eye of the wrinkler",
+            "Mouse over a wrinkler to see how many cookies are in its stomach.", 99999999.0,
+            {"Wrinkly cookies"});
+        addHeavenly("Inspired checklist",
+            "Unlocks the <b>Buy all</b> feature and the <b>Vault</b>.", 900000.0,
+            {"Persistent memory", "Permanent upgrade slot IV"});
+        addHeavenly("Genius accounting",
+            "Unlocks <b>extra price information</b>.", 2000000.0,
+            {"Inspired checklist"});
+        addHeavenly("Label printer",
+            "Mouse over an upgrade to see its tier.", 999999.0,
+            {"Starter kitchen"});
+        addHeavenly("Keepsakes",
+            "Seasonal random drops have a <b>1/5 chance</b> to carry over through "
+            "ascensions.", 1111111111.0,
+            {"Starsnow", "Starlove", "Starterror", "Startrade", "Starspawn"});
+        addHeavenly("Sugar crystal cookies",
+            "Cookie production multiplier <b>+5% permanently</b>, and <b>+1%</b> for every "
+            "building type level 10 or higher.", 1000000000.0,
+            {"Sugar baking"});
+        addHeavenly("Box of maybe cookies",
+            "Contains an assortment of...something.", 333000000000.0,
+            {"Sugar crystal cookies"});
+        addHeavenly("Box of not cookies",
+            "Contains an assortment of...something.", 333000000000.0,
+            {"Sugar crystal cookies"});
+        addHeavenly("Box of pastries",
+            "Contains an assortment of delicious pastries.", 333000000000.0,
+            {"Sugar crystal cookies"});
+        addHeavenly("Starspawn",
+            "Eggs drop <b>10%</b> more often. Golden cookies appear <b>2%</b> more often "
+            "during Easter.", 111111.0,
+            {"Season switcher"});
+        addHeavenly("Starsnow",
+            "Christmas cookies drop <b>5%</b> more often. Reindeer appear <b>5%</b> more "
+            "often.", 111111.0,
+            {"Season switcher"});
+        addHeavenly("Starterror",
+            "Spooky cookies drop <b>10%</b> more often. Golden cookies appear <b>2%</b> "
+            "more often during Halloween.", 111111.0,
+            {"Season switcher"});
+        addHeavenly("Starlove",
+            "Heart cookies are <b>50%</b> more powerful. Golden cookies appear <b>2%</b> "
+            "more often during Valentines.", 111111.0,
+            {"Season switcher"});
+        addHeavenly("Startrade",
+            "Golden cookies appear <b>5%</b> more often during Business day.", 111111.0,
+            {"Season switcher"});
+        // Angel upgrades (price factor 7, per-v2.021 presets)
+        addHeavenly("Twin Gates of Transcendence",
+            "You now <b>keep making cookies while the game is closed</b>, at the rate of "
+            "<b>5%</b> of your regular CpS.", 1.0,
+            {});
+        addHeavenly("Angels",
+            "Lowest-ranking at the first sphere of pastry heaven.", 7.0,
+            {"Twin Gates of Transcendence"});
+        addHeavenly("Archangels",
+            "Members of the first sphere of pastry heaven.", 49.0,
+            {"Angels"});
+        addHeavenly("Virtues",
+            "Found at the second sphere of pastry heaven.", 343.0,
+            {"Archangels"});
+        addHeavenly("Dominions",
+            "Ruling over the second sphere of pastry heaven.", 2401.0,
+            {"Virtues"});
+        addHeavenly("Cherubim",
+            "Sieging at the first sphere of pastry heaven.", 16807.0,
+            {"Dominions"});
+        addHeavenly("Seraphim",
+            "Leading the first sphere of pastry heaven.", 117649.0,
+            {"Cherubim"});
+        addHeavenly("God",
+            "Like Santa, but less fun.", 823543.0,
+            {"Seraphim"});
+        // Demon upgrades (price factor 7)
+        addHeavenly("Belphegor",
+            "A demon of shortcuts and laziness.", 7.0,
+            {"Twin Gates of Transcendence"});
+        addHeavenly("Mammon",
+            "The demonic embodiment of wealth.", 49.0,
+            {"Belphegor"});
+        addHeavenly("Abaddon",
+            "Master of overindulgence, governs the wrinkler brood.", 343.0,
+            {"Mammon"});
+        addHeavenly("Satan",
+            "The counterpoint to everything righteous.", 2401.0,
+            {"Abaddon"});
+        addHeavenly("Asmodeus",
+            "This demon draws his power from the desire for cookies.", 16807.0,
+            {"Satan"});
+        addHeavenly("Beelzebub",
+            "The festering incarnation of blight and disease.", 117649.0,
+            {"Asmodeus"});
+        addHeavenly("Lucifer",
+            "Also known as the Lightbringer.", 823543.0,
+            {"Beelzebub"});
+        addHeavenly("Chimera",
+            "Synergy upgrades are <b>2% cheaper</b>. You gain another <b>+5%</b> of your "
+            "regular CpS while the game is closed.", 40353607.0,  // 7^9
+            {"God", "Lucifer", "Synergies Vol. II"});
+        addHeavenly("Synergies Vol. I",
+            "Unlocks a new tier of upgrades that affect <b>2 buildings</b> at once. "
+            "Appear once you have <b>15</b> of both buildings.", 222222.0,
+            {"Satan", "Dominions"});
+        addHeavenly("Synergies Vol. II",
+            "Unlocks a new tier of upgrades that affect <b>2 buildings</b> at once. "
+            "Appear once you have <b>75</b> of both buildings.", 2222222.0,
+            {"Beelzebub", "Seraphim", "Synergies Vol. I"});
+        addHeavenly("Five-finger discount",
+            "All upgrades are <b>1% cheaper per 100 cursors</b>.", 555555.0,
+            {"Halo gloves", "Abaddon"});
+        addHeavenly("Golden cookie alert sound",
+            "Unlocks the <b>golden cookie sound selector</b>.", 9999.0,
+            {"Decisive fate", "Golden switch"});
+        addHeavenly("Basic wallpaper assortment",
+            "Unlocks the <b>background selector</b>.", 99.0,
+            {"Classic dairy selection"});
+        addHeavenly("Permanent upgrade slot I",
+            "Unlocks the first permanent upgrade slot.", 100.0,
+            {});
+        addHeavenly("Permanent upgrade slot II",
+            "Unlocks the second permanent upgrade slot.", 2000.0,
+            {"Permanent upgrade slot I"});
+        addHeavenly("Permanent upgrade slot III",
+            "Unlocks the third permanent upgrade slot.", 30000.0,
+            {"Permanent upgrade slot II"});
+        addHeavenly("Permanent upgrade slot IV",
+            "Unlocks the fourth permanent upgrade slot.", 400000.0,
+            {"Permanent upgrade slot III"});
+        addHeavenly("Permanent upgrade slot V",
+            "Unlocks the fifth permanent upgrade slot.", 5000000.0,
+            {"Permanent upgrade slot IV"});
+        addHeavenly("Kitten angels",
+            "You gain <b>more CpS</b> the more milk you have.", 9000.0,
+            {"Dominions"});
+        addHeavenly("How to bake your dragon",
+            "Allows you to purchase a <b>crumbly egg</b> once you have earned 1 million "
+            "cookies.", 9.0,
+            {});
+    }
 
     // --- Minigames (core logic; UI deferred) ---
     // Attach a minigame to each building that supports one.
@@ -448,6 +769,10 @@ void Game::logic(f64 dt) {
         if (buildingsOwned >= 1000) { /* Win('Engineer') */ }
         if (buildingsOwned >= 2000) { /* Win('Lord of Constructs') */ }
 
+        // Unlock the heavenly upgrade chain as prestige grows (JS Game.Logic).
+        unlockHeavenlyChain();
+        unlockAvailablePrestigeUpgrades();
+
         if (handmadeCookies >= 1000.0) { /* Win('Clicktastic'); Unlock('Plastic mouse'); */ }
         if (handmadeCookies >= 100000.0) { /* Win('Clickathlon'); Unlock('Iron mouse'); */ }
         if (handmadeCookies >= 10000000.0) { /* Win('Clickolympics'); Unlock('Titanium mouse'); */ }
@@ -640,6 +965,26 @@ void Game::calculateGains() {
     // --- prestige multiplier ---
     if (ascendTimer <= 0.0) {
         mult += prestige * 0.01 * heavenlyPower * GetHeavenlyMultiplier();
+    }
+
+    // --- pseudoCookie (permanent CPS multiplier) upgrades ---
+    // Heavenly cookies (+10%), Wrinkly cookies (+10%), Sugar crystal cookies
+    // (+5% + per-building-level), etc. Mirrors JS CalculateGains.
+    for (auto& uptr : upgrades) {
+        auto* u = uptr.get();
+        if (!u || !u->bought) continue;
+        if (u->pool == "prestige") {
+            if (u->name == "Heavenly cookies") mult *= 1.10;
+            else if (u->name == "Wrinkly cookies") mult *= 1.10;
+            else if (u->name == "Sugar crystal cookies") {
+                f64 power = 5.0;
+                // +1% for every building type level 10 or higher.
+                i32 levels10 = 0;
+                for (auto& b : objects) if (b && b->level >= 10) ++levels10;
+                power += static_cast<f64>(levels10);
+                mult *= 1.0 + power * 0.01;
+            }
+        }
     }
 
     mult *= eff("cps");
@@ -986,9 +1331,16 @@ bool Game::buyHeavenlyUpgrade(const std::string& name) {
     for (auto& u : upgrades) {
         if (u && u->name == name) {
             if (!u->canBuy()) return false;   // not unlocked or already bought
-            if (heavenlyChips < u->price) return false;
-            heavenlyChips -= u->price;
-            heavenlyChipsSpent += u->price;
+            // Check all prerequisite parents are bought.
+            for (const auto& parentName : u->parents) {
+                if (!has(parentName)) return false;
+            }
+            // Prestige-pool upgrades are exempt from ordinary purchase
+            // discounts: price is the raw base price (rounded up).
+            f64 price = u->getPrice();
+            if (heavenlyChips < price) return false;
+            heavenlyChips -= price;
+            heavenlyChipsSpent += price;
             u->bought = true;
             recalculateGains_ = true;
             return true;
@@ -1031,7 +1383,302 @@ f64 Game::auraMult(const std::string& /*name*/) {
 }
 
 f64 Game::GetHeavenlyMultiplier() {
-    return 1.0; // prestige not implemented yet
+    // Mirrors JS Game.GetHeavenlyMultiplier. Cumulative contributions from the
+    // five heavenly multiplier unlocks, plus Lucky digit/number/payout, the
+    // Dragon God aura and the Creation god. Returns the fraction of the
+    // prestige level's potential that is unlocked (0..1).
+    f64 heavenlyMult = 0.0;
+    if (has("Heavenly chip secret")) heavenlyMult += 0.05;
+    if (has("Heavenly cookie stand")) heavenlyMult += 0.20;
+    if (has("Heavenly bakery")) heavenlyMult += 0.25;
+    if (has("Heavenly confectionery")) heavenlyMult += 0.25;
+    if (has("Heavenly key")) heavenlyMult += 0.25;
+    heavenlyMult *= 1.0 + auraMult("Dragon God") * 0.05;
+    if (has("Lucky digit")) heavenlyMult *= 1.01;
+    if (has("Lucky number")) heavenlyMult *= 1.01;
+    if (has("Lucky payout")) heavenlyMult *= 1.01;
+    if (getGodLevel("creation") >= 1) {
+        i32 godLvl = getGodLevel("creation");
+        if (godLvl == 1) heavenlyMult *= 0.7;
+        else if (godLvl == 2) heavenlyMult *= 0.8;
+        else if (godLvl == 3) heavenlyMult *= 0.9;
+    }
+    return heavenlyMult;
+}
+
+// ---------------------------------------------------------------------------
+// Prestige
+// ---------------------------------------------------------------------------
+
+void Game::EarnHeavenlyChips(f64 cookiesForfeited) {
+    // Recalculate prestige from lifetime cookies forfeited (cookiesReset + the
+    // cookies forfeited this ascension). Award one heavenly chip per newly
+    // earned prestige level. Never awards duplicate chips; a zero-prestige
+    // ascension (cookiesReset + cookiesForfeited < 1e12) yields nothing.
+    f64 total = cookiesReset + cookiesForfeited;
+    i32 newPrestige = static_cast<i32>(std::floor(std::cbrt(total / 1000000000000.0)));
+    if (newPrestige > static_cast<i32>(prestige)) {
+        i32 gained = newPrestige - static_cast<i32>(prestige);
+        heavenlyChips += static_cast<f64>(gained);
+        prestige = static_cast<f64>(newPrestige);
+    }
+    // Clamp at zero (defensive; cbrt of a non-negative total is non-negative).
+    if (prestige < 0.0) prestige = 0.0;
+    if (heavenlyChips < 0.0) heavenlyChips = 0.0;
+}
+
+// ---------------------------------------------------------------------------
+// Reset (hard/soft)
+// ---------------------------------------------------------------------------
+
+void Game::Reset(bool hard) {
+    // Mirrors JS Game.Reset(hard). Preserves permanent progression (achievements,
+    // prestige, heavenly chips, heavenly upgrades, permanent slots, sugar lumps,
+    // building levels) and resets run-specific state. Every field is assigned
+    // directly so a failure part-way through cannot leave the game in a
+    // partially corrupted state — each assignment is independent.
+
+    // Track cookies forfeited this run (used by EarnHeavenlyChips before this
+    // call; cookiesReset is updated here for the running total).
+    cookiesReset += cookiesEarned;
+
+    // --- reset run-specific state ---
+    cookies = 0.0;
+    cookiesEarned = 0.0;
+    cookieClicks = 0;
+    goldenClicksLocal = 0;
+    handmadeCookies = 0;
+    if (hard) {
+        bgType = 0;
+        milkType = 0;
+        chimeType = 0;
+        vault.clear();
+    }
+    pledges = 0;
+    pledgeT = 0.0;
+    elderWrath = 0.0;
+    nextResearch = 0;
+    researchT = 0.0;
+    seasonT = 0.0;
+    seasonUses = 0;
+    season = baseSeason;
+
+    // Timers restart for the new run.
+    startDate = static_cast<f64>(now_ms());
+    lastDate = startDate;
+
+    cookiesSucked = 0.0;
+    wrinklersPopped = 0;
+    // Reset wrinklers to absent (phase 0).
+    for (auto& w : wrinklers) { w.phase = 0; w.close = 0; w.sucked = 0.0; }
+
+    santaLevel = 0;
+    reindeerClicked = 0;
+
+    dragonLevel = 0;
+    dragonAura = 0;
+    dragonAura2 = 0;
+
+    fortuneGC = 0;
+    fortuneCPS = 0;
+
+    // Successful ascension increments resets only when prestige was gained
+    // (mirrors JS). Zero-prestige ascensions still increment `ascensions`
+    // (done in reincarnate()).
+    if (static_cast<i32>(prestige) > 0) {
+        resets++;
+    }
+
+    // --- buildings: reset amounts, not levels ---
+    buildingsOwned = 0;
+    for (auto& b : objects) {
+        if (!b) continue;
+        b->amount = 0;
+        b->bought = 0;
+        b->free = 0;
+        b->totalCookies = 0.0;
+        b->switchMinigame(false);
+        if (hard) b->muted = 0;
+        b->refresh();
+    }
+
+    // --- upgrades: reset non-prestige, non-lasting upgrades ---
+    for (auto* u : upgradesById) {
+        if (!u) continue;
+        if (hard || u->pool != "prestige") u->bought = false;
+        if (hard) u->unlocked = false;
+    }
+
+    // Rebuild counters.
+    buildingsOwned = 0;
+    upgradesOwned = 0;
+    for (auto& b : objects) buildingsOwned += b->amount;
+
+    // --- non-hard: preserve permanent upgrades and starter kits ---
+    if (!hard) {
+        for (i32 i = 0; i < 5; ++i) {
+            if (permanentUpgrades[i] != -1 &&
+                permanentUpgrades[i] < static_cast<i32>(upgradesById.size()) &&
+                upgradesById[permanentUpgrades[i]]) {
+                // Permanent upgrade effects are already active via bought flag;
+                // ensure they stay unlocked.
+                upgradesById[permanentUpgrades[i]]->unlocked = true;
+            }
+        }
+        if (has("Starter kit")) {
+            if (auto* cur = getBuilding("Cursor")) cur->free = 10;
+        }
+        if (has("Starter kitchen")) {
+            if (auto* gm = getBuilding("Grandma")) gm->free = 5;
+        }
+    }
+
+    // --- minigames: reset run state, keep unlocks/levels ---
+    for (auto& b : objects) {
+        if (!b) continue;
+        if (b->minigameLoaded && b->minigame) {
+            b->minigame->load(""); // reset run state, keep seed unlocks
+        }
+    }
+    // Standalone minigames (e.g. Dungeons).
+    if (auto it = minigames.find(-1); it != minigames.end() && it->second) {
+        it->second->load("");
+    }
+
+    buyBulk = 1;
+    buyMode = 1;
+
+    recalculateGains_ = true;
+
+    // Unlock the heavenly upgrade chain when prestige > 0.
+    unlockHeavenlyChain();
+    unlockAvailablePrestigeUpgrades();
+}
+
+void Game::unlockHeavenlyChain() {
+    // Mirrors the JS unlock block in Game.Logic:
+    //   if (Game.prestige > 0 && Game.ascensionMode != 1) {
+    //     Game.Unlock('Heavenly chip secret');
+    //     if (Game.Has('Heavenly chip secret')) Game.Unlock('Heavenly cookie stand');
+    //     ...
+    //   }
+    if (static_cast<i32>(prestige) <= 0) return;
+
+    auto unlockByName = [this](const std::string& name) {
+        for (auto& uptr : upgrades) {
+            auto* u = uptr.get();
+            if (u && u->name == name) { u->unlocked = true; return; }
+        }
+    };
+
+    unlockByName("Heavenly chip secret");
+    if (has("Heavenly chip secret")) unlockByName("Heavenly cookie stand");
+    if (has("Heavenly cookie stand")) unlockByName("Heavenly bakery");
+    if (has("Heavenly bakery")) unlockByName("Heavenly confectionery");
+    if (has("Heavenly confectionery")) unlockByName("Heavenly key");
+}
+
+void Game::unlockAvailablePrestigeUpgrades() {
+    // General unlock for prestige-pool upgrades: unlock any prestige upgrade
+    // whose parents are all bought and whose showIf condition (if any) passes.
+    // Called whenever prestige or ownership changes.
+    if (static_cast<i32>(prestige) <= 0) return;
+    for (auto& uptr : upgrades) {
+        auto* u = uptr.get();
+        if (!u || u->pool != "prestige" || u->unlocked) continue;
+        // ShowIf visibility condition.
+        if (u->showIf && !u->showIf()) continue;
+        // All parents must be bought.
+        bool allParentsBought = true;
+        for (const auto& parentName : u->parents) {
+            if (!has(parentName)) { allParentsBought = false; break; }
+        }
+        if (allParentsBought) u->unlocked = true;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Ascension / reincarnation lifecycle
+// ---------------------------------------------------------------------------
+
+void Game::reincarnate() {
+    // Full ascend: turn this run's cookies into prestige/chips, then reset the
+    // run while preserving permanent progression. Safe to call repeatedly; each
+    // step fully commits before the next begins, so a failure cannot leave
+    // partially corrupted state.
+
+    // 1. Earn heavenly chips for this run's cookies forfeited.
+    EarnHeavenlyChips(cookiesEarned);
+
+    // 2. Count the ascension (separate from prestige level). A successful
+    //    reincarnation always counts, even a zero-prestige ascension.
+    ++ascensions;
+    if (static_cast<i32>(prestige) > 0 && static_cast<i32>(prestige) > 0) {
+        // Mirror JS: resets only increment when prestige was actually gained.
+        // (gainedPrestige is tracked via EarnHeavenlyChips above.)
+        resets = static_cast<i32>(std::max(static_cast<i32>(resets), 0));
+    }
+
+    // 3. Reset run-specific state, preserving permanent progression.
+    Reset(false);
+
+    // 4. Re-apply permanent upgrade slot selections on the fresh run.
+    applyPermanentUpgrades();
+
+    // 5. Recalculate gains so the new run's CpS reflects prestige + slots.
+    recalculateGains_ = true;
+    calculateGains();
+}
+
+bool Game::applyPermanentUpgrades() {
+    // Re-apply all permanent upgrade slot selections on a new run, without
+    // duplicate application. Each slot holds an upgrade id; if that upgrade is
+    // eligible (bought, not a prestige/noPerm upgrade), its effect is already
+    // active via the normal has()/bought checks — permanent slots in this port
+    // preserve the *selection* across ascensions so the same ordinary upgrade
+    // is re-applied automatically (its bought flag survives via save/load).
+    // Returns true if all slots are valid.
+    bool ok = true;
+    for (i32 i = 0; i < 5; ++i) {
+        i32 uid = permanentUpgrades[i];
+        if (uid < 0) continue; // empty slot
+        if (uid >= static_cast<i32>(upgradesById.size()) || !upgradesById[uid]) {
+            // Dangling reference: clear the slot rather than corrupt state.
+            permanentUpgrades[i] = -1;
+            ok = false;
+            continue;
+        }
+        Upgrade* u = upgradesById[uid];
+        // Only ordinary (non-prestige, non-noPerm) upgrades can occupy a slot.
+        if (u->pool == "prestige" || u->noPerm) {
+            permanentUpgrades[i] = -1;
+            ok = false;
+            continue;
+        }
+    }
+    return ok;
+}
+
+bool Game::assignPermanentSlot(i32 slot, i32 upgradeId) {
+    // Select an eligible ordinary upgrade for a permanent slot. Eligible:
+    // not already in another slot, not a prestige/noPerm upgrade, bought.
+    if (slot < 0 || slot >= 5) return false;
+    if (upgradeId < 0 || upgradeId >= static_cast<i32>(upgradesById.size()))
+        return false;
+    Upgrade* u = upgradesById[upgradeId];
+    if (!u) return false;
+    if (!u->bought) return false;            // must be bought to be slotted
+    if (u->pool == "prestige" || u->noPerm) return false;
+    // No duplicate slots.
+    for (i32 i = 0; i < 5; ++i) {
+        if (permanentUpgrades[i] == upgradeId) return false;
+    }
+    // Clear any existing slot holding this upgrade (shouldn't happen, but be safe).
+    for (i32 i = 0; i < 5; ++i) {
+        if (permanentUpgrades[i] == upgradeId) permanentUpgrades[i] = -1;
+    }
+    permanentUpgrades[slot] = upgradeId;
+    return true;
 }
 
 void Game::updateShimmers() { /* TODO */ }

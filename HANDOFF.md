@@ -3,6 +3,8 @@
 ## Current State
 UI layer extracted from Game. All layout lives in `cpp/UI.h` Layout struct, all drawing in `cpp/UI.cpp`. Core `Game` knows nothing of SDL, OpenGL, FreeType, or rendering. Input flows `UI::on_pointer(x,y)` → game action → main loop applies to `Game`.
 
+**Ascension and Prestige core implemented (v2.021).** Prestige, heavenly chips, ascension lifecycle, heavenly upgrade dataset, permanent upgrade slots, prestige CPS, save/load extensions, and ascension statistics are all in the core `Game`/`SaveLoad` with no UI or platform dependencies.
+
 ## DONE — UI Layer Extraction
 - Native SDL2 desktop window (**1280x720, 16:9**, resizable, OpenGL) via `main.cpp`.
 - `Game` has **no `draw()` function** and includes **no `Render` or `UI` headers**. Core compiles with only logic headers.
@@ -11,6 +13,15 @@ UI layer extracted from Game. All layout lives in `cpp/UI.h` Layout struct, all 
 - All layout numbers live in a `Layout` struct, **not** inline in draw code.
 - Behaviour and visuals are **pixel-identical** to the real v2.058 game (fractions measured from `real_game.png`).
 - `Layout` can be supplied by a DSi/3DS port and reuse the same drawing code without changes.
+
+## DONE — Ascension and Prestige Core (v2.021)
+- **Prestige**: `prestige = floor(cuberoot(cookiesReset / 1e12))`; one heavenly chip per newly earned level; independent tracking of `cookiesReset`, `prestige`, `heavenlyChips`, `heavenlyChipsSpent`; no duplicate rewards; zero-prestige ascensions handled.
+- **Ascension lifecycle**: `reincarnate()` → `EarnHeavenlyChips()` → `Reset(false)` → `applyPermanentUpgrades()`. Preserves achievements, sugar lumps, building levels, heavenly upgrades, Garden seed unlocks; resets run-specific state. No partial corruption.
+- **Heavenly upgrades**: complete pool=`prestige` dataset from v2.021 presets (~80 upgrades) with IDs, costs, parents, `showIf` visibility, `noPerm` flags. Five multiplier unlocks (secret +5%, stand +20%, bakery +50%, confectionery +75%, key +100%) with cumulative `GetHeavenlyMultiplier()`. `ceil` price rounding; prestige pool exempt from ordinary discounts.
+- **Permanent upgrade slots**: 5 slots (`-1` = empty). `assignPermanentSlot()` selects eligible ordinary upgrades. Preserved through ascensions.
+- **Prestige CPS**: integrated into `calculateGains()` via `prestige * 0.01 * heavenlyPower * GetHeavenlyMultiplier()`. PseudoCookie upgrades applied.
+- **Persistence**: SaveLoad `ascensions` field (section 4, field 51, append-only). Prestige recomputed from `cookiesReset` on load. Backwards compatible with old saves. Round-trip verified.
+- **Statistics**: `ascensions` tracked separately from `prestige` and `resets`.
 
 ## UI Layout — Fractions Verified vs Real Game
 | Element | Real Fraction (1920x919) | Port Fraction (1280x720) | Status |
@@ -33,44 +44,47 @@ UI layer extracted from Game. All layout lives in `cpp/UI.h` Layout struct, all 
 ## Rendering — Verified Clean
 - `cmake --build build -j` (exit 0)
 - `timeout 3 ./build/cookie_clicker` (exit 124, expected from timeout)
-- All 12 textures load with no magenta fallback: `bgStripes.png`, `vignette.png`, `glow.png`, `perfectCookie.png`, `smallCookies.png`, `panelHorizontal.png`, `panelVertical.png`, `storeTile.png`, `cursor.png`, `grandma.png`, `farm.png`, `mine.png`, `factory.png`, `bank.png`
-- No Tahoma references in source (verified with `grep -rl "[Tt]ahoma" cpp/ || echo "SOURCE CLEAN"`)
+- All 12 textures load with no magenta fallback
+- No Tahoma references in source
 - Build warning-clean
+- **14 deterministic platform-free tests pass** (prestige, ascension, heavenly upgrades, permanent slots, save/load, CPS multipliers)
 
 ## File Changes Summary
-- `cpp/UI.h` — Layout struct with all fractions, scaled base sizes, font enums (Default=Kavoon, Body=PT Sans); middle panel, top bar corner buttons, store panel sections
-- `cpp/UI.cpp` — draw() with background layers, banner, count/CPS, middle panel cookie strip + grass, top menu bar corner buttons + centered ticker, store column with `storeW/304` scaling, upgrade icons, Buy/Sell toggle, "per second: X" text
+- `cpp/UI.h` — Layout struct with all fractions, scaled base sizes, font enums
+- `cpp/UI.cpp` — draw() with background layers, banner, count/CPS, middle panel, top menu bar, store column
 - `cpp/main.cpp` — window 1280x720 (16:9), resizable, OpenGL
-- `cpp/EmbeddedAssets.h/cpp` — 26 embedded assets: 18 building icons + perfectCookie + cursor + farm/mine/factory/bank/wizardtower/shipment/alchemylab/portal/timemachine/antimattercondenser/prism/chancemaker/fractalEngine/javascriptconsole/idleverse + `bgStripes.png`/`vignette.png`/`glow.png` + `Kavoon-Regular.ttf` + `PTSans-*.ttf`; `bgBlue.png` dropped
-- `cpp/Render.h/cpp` — `drawTexture` optional UV params; `drawTextureTiled` one-axis tiling; glyph cache cleared on face size change
-- `cpp/Game.cpp` — Permanent unlock: `cookiesEarned >= basePrice` → `b->locked = false`; cookie wobble damping threshold
+- `cpp/EmbeddedAssets.h/cpp` — 26 embedded assets (18 building icons + textures + fonts); `bgBlue.png` dropped
+- `cpp/Render.h/cpp` — `drawTexture` optional UV params; `drawTextureTiled`; glyph cache cleared on size change
+- `cpp/Game.cpp` — Permanent unlock; cookie wobble damping; **ascension/prestige core: `Reset()`, `reincarnate()`, `EarnHeavenlyChips()`, `GetHeavenlyMultiplier()`, heavenly upgrade dataset, permanent slots, pseudoCookie CPS**
+- `cpp/Game.h` — added `ascensions`, `Reset()`, `reincarnate()`, `EarnHeavenlyChips()`, `GetHeavenlyMultiplier()`, `assignPermanentSlot()`, `applyPermanentUpgrades()`, `unlockHeavenlyChain()`, `unlockAvailablePrestigeUpgrades()`; `permanentUpgrades` init to `-1`
+- `cpp/Upgrade.h` — added `pool`, `parents`, `showIf`, `noPerm` fields
+- `cpp/SaveLoad.cpp` — added `ascensions` field; prestige recomputation on load
+- `cpp/SaveLoad.h` — documented `ascensions` field
 - `cpp/Types.h` — `i32`/`u32` definitions
 
 ## Known Broken / Stubbed (do not fix — out of scope)
 - `cpp/Audio.cpp` — no-op
 - `cpp/Assets.cpp` — no-op
-- `cpp/Game.cpp::updateSpecial/updateGrandmapocalypse/particlesUpdate` — empty
-- `cpp/SaveLoad.cpp::loadSave()` / `writeSave()` — minigame/ascension stubs
-- `cpp/Minigame.cpp`, Garden/Grimoire/Pantheon/Dungeons — all stubs
+- `cpp/Game.cpp::updateGrandmapocalypse/particlesUpdate` — empty
+- `cpp/Minigame.cpp`, Garden/Grimoire/Pantheon/Dungeons — core logic only, stubs for UI
 - `cpp/DungeonGen.cpp` — returns "Mysterious dungeon" only
 - `cpp/Shimmer.cpp`, `Particle.cpp` — basic structs only
 - `cpp/Building.cpp` — `modifyBuildingPrice` hook not implemented
 - Wrinkler simulation beyond `cpsSucked`; Buff behavior
 - Floating cookie particles around big cookie
+- **Many heavenly upgrade effects** (angels, kittens, synergies, seasons, sugar maturation) are registered as data but their specific mechanics are stubbed — consistent with existing stubbed subsystems
+- **UI for ascend tree, heavenly upgrade purchasing, permanent slot selection** — deferred per non-goals
 
 ## Build & Test Commands
 ```
 cd /home/superuser/Cookie-Clicker
 cmake -S cpp -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
+cmake --build build --target cookie_clicker_logic_check
 timeout 3 ./build/cookie_clicker   # exit 124 expected
 ```
 
-Syntax check (no SDL/png/ft needed for core):
-```
-cd cpp
-g++ -std=c++17 -fsyntax-only -Wall -Wextra -I. *.cpp
-```
+Deterministic platform-free tests: compile `test_ascension.cpp` (in /tmp/opencode) with logic sources and run.
 
 ## Commit Workflow
 1. Run build (`cmake --build build -j`). Stop on failure.

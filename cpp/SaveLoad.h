@@ -29,7 +29,7 @@ class Game;
 //       heavenlyChipsSpent;heavenlyCookies;ascensionMode;
 //       permanentUpgrades[0..4];dragonLevel;dragonAura;dragonAura2;chimeType;
 //       volume;shinies;shiniesAmount;lumps;lumpsTotal;lumpT;lumpRefill;
-//       lumpCurrentType;vault;heralds;fortuneGC;fortuneCPS
+//       lumpCurrentType;vault;heralds;fortuneGC;fortuneCPS;ascensions
 //   5  buildings: amount,bought,totalCookies,level,minigameSave,muted; ...
 //   6  upgrades bitstring
 //   7  achievements bitstring

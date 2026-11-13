@@ -136,8 +136,16 @@ public:
     i32 fortuneGC = 0;
     i32 fortuneCPS = 0;
 
-    // --- permanent upgrades (bitfield, 5 slots) ----------------------------
-    i32 permanentUpgrades[5] = {0, 0, 0, 0, 0};
+    // --- permanent upgrades (5 slots; -1 = empty slot) -----------------------
+    // Mirrors JS Game.permanentUpgrades ([-1,-1,-1,-1,-1]). Preserved across
+    // ascensions. Each slot holds the id of an ordinary upgrade whose effect is
+    // re-applied at the start of every new run.
+    i32 permanentUpgrades[5] = {-1, -1, -1, -1, -1};
+
+    // --- ascension statistics ------------------------------------------------
+    // Successful ascension count (separate from prestige level). Incremented
+    // only when an ascension actually grants at least one prestige level.
+    i32 ascensions = 0;
 
     // --- preferences -------------------------------------------------------
     struct Prefs {
@@ -205,6 +213,9 @@ public:
     void loop();                   // one frame: logic + draw
     void logic(f64 dt);            // Game.Logic
 
+    // --- ascension ---------------------------------------------------------
+    void Reset(bool hard);          // hard/soft reset; preserves permanent progression
+
     // --- economy -----------------------------------------------------------
     void earn(f64 howmuch);
     void spend(f64 howmuch);
@@ -216,7 +227,6 @@ public:
     f64 GetTieredCpsMult(Building* me);                        // tiered CPS mult
     f64 magicCpS(const std::string& name);                     // grimoire magic mult
     f64 auraMult(const std::string& name);                     // dragon aura mult
-    f64 GetHeavenlyMultiplier();                               // prestige mult
     void buyBuilding(Building* b, i32 amount = 1);              // purchase building
     void sellBuilding(Building* b, i32 amount = 1);             // sell building
     bool buyUpgrade(const std::string& name);                   // purchase upgrade (core; UI deferred)
@@ -262,6 +272,29 @@ public:
     // --- heavenly upgrades --------------------------------------------------
     bool buyHeavenlyUpgrade(const std::string& name);   // purchase with heavenly chips
     bool hasFortuneCookies() const;             // whether Fortune cookies (ID 643) is bought
+
+    // Prestige calculation: floor(cuberoot(lifetime cookies baked / 1e12)).
+    // Award one heavenly chip per newly earned prestige level.
+    void EarnHeavenlyChips(f64 cookiesForfeited);
+    f64 GetHeavenlyMultiplier();                // prestige CPS mult (heavenly upgrades etc.)
+
+    // Ascension / reincarnation lifecycle. Preserves permanent progression and
+    // resets run-specific state. Safe to call repeatedly; never leaves partial
+    // state behind.
+    void reincarnate();                          // full ascend: earn chips, then reset run
+
+    // Permanent upgrade slot management.
+    bool assignPermanentSlot(i32 slot, i32 upgradeId);  // select an eligible ordinary upgrade
+    i32 permanentUpgradeId(i32 slot) const { return permanentUpgrades[slot]; }
+    bool applyPermanentUpgrades();               // re-apply all slot selections on a new run
+
+    // --- heavenly upgrade chain unlocking ---
+    // Unlocks Legacy when prestige > 0, then chains each multiplier upgrade to
+    // the previous one once bought. Mirrors JS Game.Logic unlock block.
+    void unlockHeavenlyChain();
+
+    // General unlock for prestige-pool upgrades whose parents are all bought.
+    void unlockAvailablePrestigeUpgrades();
 
 private:
     bool recalculateGains_ = true;

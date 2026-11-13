@@ -283,6 +283,7 @@ std::string SaveLoad::writeSave(Game& game, i32 /*type*/) {
     intField(game.heralds);          // 48
     intField(game.fortuneGC);        // 49
     intField(game.fortuneCPS);       // 50
+    intField(game.ascensions);       // 51 successful ascension count
 
     s << '|';
 
@@ -495,6 +496,13 @@ bool SaveLoad::loadSave(Game& game, const std::string& raw) {
     game.heralds = static_cast<i32>(geti(spl, 48));
     game.fortuneGC = static_cast<i32>(geti(spl, 49));
     game.fortuneCPS = static_cast<i32>(geti(spl, 50));
+    game.ascensions = static_cast<i32>(geti(spl, 51, 0));
+
+    // Recompute prestige from cookiesReset (mirrors JS LoadSave line 2339:
+    // Game.prestige=Math.floor(Game.HowMuchPrestige(Game.cookiesReset))).
+    // Ensures old saves without a prestige field still derive it correctly.
+    game.prestige = static_cast<f64>(
+        static_cast<i32>(std::floor(std::cbrt(game.cookiesReset / 1000000000000.0))));
 
     // Restore wrinkler state (JS LoadWrinklers semantics):
     // shinies are assigned to the first slots, then normals; sucked split evenly.

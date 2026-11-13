@@ -2,6 +2,7 @@
 
 #include "Types.h"
 #include <string>
+#include <vector>
 #include <functional>
 
 class Building;
@@ -20,6 +21,22 @@ public:
     bool unlocked = false;
     bool bought = false;
     bool vanilla = true;
+
+    // Upgrade pool: "", "cookie", "toggle", "debug", "prestige", "tech", etc.
+    // Prestige-pool upgrades are bought with heavenly chips and are exempt from
+    // ordinary cookie purchase discounts.
+    std::string pool = "";
+
+    // Prerequisite upgrades (by name) that must be bought before this one can
+    // be purchased. Supports multiple parents and dependency graphs.
+    std::vector<std::string> parents;
+
+    // Visibility condition (JS `showIf`). When set, the upgrade only appears in
+    // the ascend tree if this returns true.
+    std::function<bool()> showIf;
+
+    // When true, this upgrade cannot be placed in a permanent upgrade slot.
+    bool noPerm = false;
 
     // tiered upgrade linkage
     Building* tieredBuilding = nullptr;
