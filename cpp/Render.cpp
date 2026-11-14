@@ -26,6 +26,9 @@ namespace {
 SDL_Window* g_window = nullptr;
 i32 g_w = 900;
 i32 g_h = 600;
+// Clickable areas registered during draw; reset at the start of every frame
+// so hit-testing always reflects the currently drawn UI.
+i32 g_hitsN = 0;
 
 FT_Library g_ft = nullptr;
 FT_Face g_face = nullptr;
@@ -394,6 +397,7 @@ void Render::shutdown() {
 
 void Render::newFrame() {
     SDL_GetWindowSize(g_window, &g_w, &g_h);
+    g_hitsN = 0; // clickable areas are re-registered every draw frame
     glViewport(0, 0, g_w, g_h);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
@@ -718,7 +722,6 @@ struct HitArea {
     f32 x = 0, y = 0, w = 0, h = 0, r = 0;
 };
 HitArea g_hits[64];
-i32 g_hitsN = 0;
 
 void Render::registerCookie(f32 x, f32 y, f32 r) {
     if (g_hitsN >= 64) return;

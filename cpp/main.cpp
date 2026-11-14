@@ -17,9 +17,12 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // DSi target: two 256x192 screens stacked vertically (Layout drives the size).
+    Layout layout;
     SDL_Window* window = SDL_CreateWindow(
-        "Cookie Clicker (C++ port)", 100, 100, 1280, 720,
-        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+        "Cookie Clicker (C++ port)", 100, 100,
+        layout.screenW, layout.screenH * 2 + layout.screenGap,
+        SDL_WINDOW_OPENGL);
     if (!window) {
         std::cerr << "SDL_CreateWindow Error: " << SDL_GetError() << std::endl;
         SDL_Quit();
@@ -93,6 +96,17 @@ int main(int argc, char** argv) {
                 break;
             case GameAction::Type::ClickFortune:
                 game.clickTickerFortune();
+                break;
+            case GameAction::Type::TogglePref:
+                game.togglePref(action.prefName);
+                break;
+            case GameAction::Type::SaveGame:
+                game.toSave = true;
+                ui.notify("Game saved");
+                break;
+            case GameAction::Type::WipeSave:
+                game.Reset(true);
+                ui.notify("Save wiped");
                 break;
             }
         }
