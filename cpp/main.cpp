@@ -7,6 +7,7 @@
 #include <SDL2/SDL.h>
 #include <chrono>
 #include <iostream>
+#include <memory>
 
 int main(int argc, char** argv) {
     (void)argc;
@@ -17,6 +18,8 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // Desktop profile: 1280x720 resizable window. (UI_PROFILE CMake option,
+    // wired in the next commit, selects the handheld DSi profile instead.)
     SDL_Window* window = SDL_CreateWindow(
         "Cookie Clicker (C++ port)", 100, 100, 1280, 720,
         SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
@@ -35,7 +38,8 @@ int main(int argc, char** argv) {
     game.launch();
     game.load(); // populate buildings, wrinklers, buff types
 
-    UI ui(game, render);
+    // Default profile is desktop; the UI_PROFILE CMake option selects handheld.
+    std::unique_ptr<UI> ui = CreateUI(UIProfile::Desktop, game, render);
 
     bool running = true;
     SDL_Event event;
@@ -64,21 +68,18 @@ int main(int argc, char** argv) {
         last = now;
         accumulator += frameDt;
 
-        // fixed-timestep logic, mirroring the JS setTimeout loop (~30 FPS)
         while (accumulator >= targetDt) {
-            game.loop();            // logic only; draw happens once per frame below
-            ui.update(targetDt);    // per-frame UI state (toast lifetimes, etc.)
+            game.loop();
+            ui->update(targetDt);
             accumulator -= targetDt;
         }
 
         render.newFrame();
-        ui.draw();                  // draw once per rendered frame (owned by UI)
+        ui->draw();
         render.render();
 
-        // handle input through the UI layer: a pointer click returns a game
-        // action that the main loop applies to Game. No hit-testing outside UI.
         if (clickPending) {
-            GameAction action = ui.on_pointer(clickX, clickY);
+            GameAction action = ui->on_pointer(clickX, clickY);
             switch (action.type) {
             case GameAction::Type::ClickCookie:
                 game.clickCookie();
@@ -93,6 +94,17 @@ int main(int argc, char** argv) {
                 break;
             case GameAction::Type::ClickFortune:
                 game.clickTickerFortune();
+                break;
+            case GameAction::Type::TogglePref:
+                game.togglePref(action.prefName);
+                break;
+            case GameAction::Type::SaveGame:
+                game.toSave = true;
+                ui->notify("Game saved");
+                break;
+            case GameAction::Type::WipeSave:
+                game.Reset(true);
+                ui->notify("Save wiped");
                 break;
             }
         }

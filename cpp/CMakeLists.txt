@@ -59,6 +59,7 @@ set(SOURCES
     Audio.cpp
     Render.cpp
     UI.cpp
+    UIHandheld.cpp
     EmbeddedAssets.cpp
 )
 
@@ -84,6 +85,7 @@ set(HEADERS
     Audio.h
     Render.h
     UI.h
+    UIHandheld.h
     EmbeddedAssets.h
 )
 
