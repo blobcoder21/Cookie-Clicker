@@ -35,6 +35,22 @@ if(EXISTS "${IMGUI_DIR}/imgui.cpp")
 endif()
 
 # ---------------------------------------------------------------------------
+# UI profile: desktop (default, 1280x720), ds / 3ds (DSi dual-screen).
+# Selects which Ui* profile main() builds via the UI_PROFILE_VAL definition.
+# ---------------------------------------------------------------------------
+set(UI_PROFILE "desktop" CACHE STRING "UI profile: desktop, ds, or 3ds")
+if(NOT UI_PROFILE STREQUAL "desktop" AND NOT UI_PROFILE STREQUAL "ds" AND NOT UI_PROFILE STREQUAL "3ds")
+    message(FATAL_ERROR "UI_PROFILE must be one of: desktop, ds, 3ds (got '${UI_PROFILE}')")
+endif()
+if(UI_PROFILE STREQUAL "desktop")
+    set(UI_PROFILE_VAL 0)
+elseif(UI_PROFILE STREQUAL "ds")
+    set(UI_PROFILE_VAL 1)
+else()
+    set(UI_PROFILE_VAL 2)
+endif()
+
+# ---------------------------------------------------------------------------
 # Sources
 # ---------------------------------------------------------------------------
 set(SOURCES
@@ -107,6 +123,8 @@ endif()
 # Target
 # ---------------------------------------------------------------------------
 add_executable(cookie_clicker ${SOURCES} ${HEADERS})
+
+target_compile_definitions(cookie_clicker PRIVATE UI_PROFILE_VAL=${UI_PROFILE_VAL})
 
 if(USE_IMGUI)
     target_compile_definitions(cookie_clicker PRIVATE IMGUI_IMPL_OPENGL_LOADER_GL3W)

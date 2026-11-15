@@ -38,8 +38,14 @@ int main(int argc, char** argv) {
     game.launch();
     game.load(); // populate buildings, wrinklers, buff types
 
-    // Default profile is desktop; the UI_PROFILE CMake option selects handheld.
+    // UI_PROFILE CMake option selects the profile (default: desktop).
+#if defined(UI_PROFILE_VAL) && UI_PROFILE_VAL == 1
+    std::unique_ptr<UI> ui = CreateUI(UIProfile::Ds, game, render);
+#elif defined(UI_PROFILE_VAL) && UI_PROFILE_VAL == 2
+    std::unique_ptr<UI> ui = CreateUI(UIProfile::ThreeDs, game, render);
+#else
     std::unique_ptr<UI> ui = CreateUI(UIProfile::Desktop, game, render);
+#endif
 
     bool running = true;
     SDL_Event event;
