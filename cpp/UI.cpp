@@ -6,15 +6,13 @@
 #include <cstdio>
 #include <string>
 #include <unordered_map>
-#include <utility>
-
-namespace {
 
 // ---------------------------------------------------------------------------
 // Display formatting for cookie counts and prices (uppercase suffixes).
 // Ported verbatim from Game.cpp (these helpers are display-only, so they live
 // in the UI layer now).
 // ---------------------------------------------------------------------------
+namespace {
 
 // Strip trailing zeros (and a dangling decimal point) from a formatted number.
 std::string cleanNum(std::string s) {
@@ -83,7 +81,7 @@ i32 UI::loadIcon(const std::string& iconPath) {
 }
 
 void UI::update(f32 dt) {
-    // Decrement toast lifetimes and drop expired ones.
+    // Decrement toast lifetimes and drop expired ones (skeleton).
     for (auto it = toasts.begin(); it != toasts.end();) {
         it->life -= dt;
         if (it->life <= 0.0f) {
@@ -100,90 +98,112 @@ void UI::notify(const std::string& text) {
     t.life = layout_.toastLife;
     t.maxLife = layout_.toastLife;
     t.active = true;
+    // Position: stack from the bottom of the cookie panel upwards.
+    // y is set at draw time based on how many toasts are active.
+    (void)t;
     toasts.push_back(std::move(t));
 }
 
-i32 UI::screenX() const {
-    return (static_cast<i32>(render_.windowW()) - layout_.screenW) / 2;
-}
-
-i32 UI::screen2Y() const {
-    return layout_.screenH + layout_.screenGap;
-}
-
-void UI::drawTextCentered(i32 x0, i32 yc, i32 w, const char* text, u32 color,
-                          f32 scale, InternalFont font) {
-    f32 tw = render_.measureText(text, scale, font);
-    f32 ty = static_cast<f32>(yc) - render_.measureTextCenterY(text, scale, font);
-    render_.drawText(static_cast<f32>(x0) + (static_cast<f32>(w) - tw) / 2.0f, ty,
-                     text, color, scale, font);
-}
-
-void UI::drawArrow(i32 x, i32 y, bool on, const char* glyph) {
-    const InternalFont body = InternalFont::Body;
-    render_.drawRect(static_cast<f32>(x), static_cast<f32>(y),
-                     static_cast<f32>(layout_.arrowW), static_cast<f32>(layout_.arrowH),
-                     on ? layout_.arrowColor : layout_.arrowColorDisabled);
-    f32 tw = render_.measureText(glyph, layout_.arrowTextScale, body);
-    f32 ty = static_cast<f32>(y) + static_cast<f32>(layout_.arrowH) / 2.0f
-        - render_.measureTextCenterY(glyph, layout_.arrowTextScale, body);
-    render_.drawText(static_cast<f32>(x) + (static_cast<f32>(layout_.arrowW) - tw) / 2.0f, ty,
-                     glyph, on ? 0x000000FF : 0x2A2A2AFF, layout_.arrowTextScale, body);
-}
-
 void UI::draw() {
+    // drawT was a per-frame draw counter; it is not used for any decision, so
+    // it is intentionally not maintained here (no behavioural impact).
+
     i32 w = render_.windowW();
     i32 h = render_.windowH();
 
+    // ------------------------------------------------------------------
+    // Background layers: tiled vertical-stripe texture + radial vignette.
+    // (The soft cookie glow is drawn just behind the big cookie below.)
+    // ------------------------------------------------------------------
+    if (!bgStripesTex) bgStripesTex = render_.loadTexture("bgStripes.png");
+    if (!vignetteTex) vignetteTex = render_.loadTexture("vignette.png");
     if (!glowTex) glowTex = render_.loadTexture("glow.png");
+    if (!panelHorizTex) panelHorizTex = render_.loadTexture("panelHorizontal.png");
+    if (!panelVertTex) panelVertTex = render_.loadTexture("panelVertical.png");
     if (!cookieTex) cookieTex = render_.loadTexture("perfectCookie.png");
+    if (!priceCookieTex) priceCookieTex = render_.loadTexture("smallCookies.png");
 
-    i32 x0 = screenX();
+    // Tiled vertical stripes, full height, natural width (never scaled).
+    render_.drawTextureTiled(bgStripesTex, 0.0f, 0.0f,
+                             static_cast<f32>(w), static_cast<f32>(h),
+                             0xFFFFFFFF, 0); // axis 0 = horizontal
+    // Dark radial vignette over the whole screen.
+    render_.drawTexture(vignetteTex, 0.0f, 0.0f,
+                        static_cast<f32>(w), static_cast<f32>(h),
+                        0xFFFFFFFF);
 
-    // Bezel gap between the two DSi screens.
-    render_.drawRect(0.0f, static_cast<f32>(layout_.screenH),
-                     static_cast<f32>(w), static_cast<f32>(layout_.screenGap),
-                     layout_.bezelColor);
+    i32 leftW = static_cast<i32>(static_cast<f32>(w) * layout_.leftPanelWidthFraction);
+    i32 storeW = static_cast<i32>(static_cast<f32>(w) * layout_.storePanelWidthFraction);
+    if (storeW < 60) storeW = 60;
+    i32 sx = w - storeW; // store panel left edge
 
-    // Screen 1 (top): Cookie panel.
-    drawCookieScreen(x0, 0);
-    // Screen 2 (bottom): tabbed Buildings / Store / Menu view.
-    drawTabScreen(x0, screen2Y());
-}
+    i32 pvW2 = 0, pvH = 0;
+    render_.textureSize(panelVertTex, &pvW2, &pvH);
 
-void UI::drawCookieScreen(i32 x0, i32 y0) {
-    i32 w = layout_.screenW;
-    i32 h = layout_.screenH;
-    const InternalFont heading = InternalFont::Default; // Kavoon
-    const InternalFont body = InternalFont::Body;       // PT Sans
+    // Vertical wood dividers between cookie panel / middle / store panel.
+    if (pvW2 > 0 && pvH > 0) {
+        render_.drawTextureTiled(panelVertTex,
+                                 static_cast<f32>(leftW), 0.0f,
+                                 static_cast<f32>(pvW2), static_cast<f32>(h),
+                                 0xFFFFFFFF, 1); // axis 1 = vertical
+        render_.drawTextureTiled(panelVertTex,
+                                 static_cast<f32>(sx - pvW2), 0.0f,
+                                 static_cast<f32>(pvW2), static_cast<f32>(h),
+                                 0xFFFFFFFF, 1);
+    }
 
-    render_.drawRect(static_cast<f32>(x0), static_cast<f32>(y0),
-                     static_cast<f32>(w), static_cast<f32>(h), layout_.screenBgColor);
+    i32 cx = leftW / 2; // cookie panel horizontal centre
 
-    // Bakery name (Kavoon heading).
-    drawTextCentered(x0, y0 + static_cast<i32>(static_cast<f32>(h) * layout_.bakeryYFraction), w,
-                     game_.getBakeryName().c_str(), layout_.bakeryColor,
-                     layout_.bakeryScale, heading);
+    // ------------------------------------------------------------------
+    // Left panel: rounded banner with bakery name, then "N cookies" large
+    // with "per second: X" small beneath, then the cookie with its glow.
+    // ------------------------------------------------------------------
+    const InternalFont heading = InternalFont::Default;   // Kavoon
+    const InternalFont body = InternalFont::Body;         // PT Sans
 
-    // Cookie count ("N cookies").
-    std::string cookieStr = formatCookies(game_.cookies) + " cookies";
-    drawTextCentered(x0, y0 + static_cast<i32>(static_cast<f32>(h) * layout_.cookieCountYFraction), w,
+    // --- bakery name banner (Kavoon) ---
+    std::string bakery = game_.getBakeryName();
+    f32 bakeryScale = layout_.bakeryScale;
+    f32 bw = render_.measureText(bakery.c_str(), bakeryScale, heading);
+    f32 bakeryOff = render_.measureTextCenterY(bakery.c_str(), bakeryScale, heading);
+    f32 bannerYc = static_cast<f32>(h) * layout_.bakeryYFraction; // visual centre
+    f32 bakeryY = bannerYc - bakeryOff; // baseline
+    // Banner tightly wraps the text (+ small padding), centred on the visual centre.
+    f32 textH = bakeryScale * 16.0f;
+    f32 bannerW = bw + 2.0f * layout_.bannerPadX;
+    f32 bannerH = textH + 2.0f * layout_.bannerPadY;
+    f32 bannerX = static_cast<f32>(cx) - bannerW / 2.0f;
+    f32 bannerY = bannerYc - bannerH / 2.0f;
+    render_.drawRect(bannerX, bannerY, bannerW, bannerH, layout_.bannerColor);
+    render_.drawText(static_cast<f32>(cx) - bw / 2.0f, bakeryY,
+                     bakery.c_str(), layout_.bakeryColor, bakeryScale, heading);
+
+    // --- cookie count "N cookies" (PT Sans, large) ---
+    std::string cookieStr = formatCookies(game_.cookies);
+    f32 cw = render_.measureText(cookieStr.c_str(), layout_.cookieCountScale, body);
+    f32 cookieYc = static_cast<f32>(h) * layout_.cookieCountYFraction;
+    f32 cookieOff = render_.measureTextCenterY(cookieStr.c_str(), layout_.cookieCountScale, body);
+    f32 cookieY = cookieYc - cookieOff;
+    render_.drawText(static_cast<f32>(cx) - cw / 2.0f, cookieY,
                      cookieStr.c_str(), layout_.cookieCountColor,
                      layout_.cookieCountScale, body);
 
-    // CPS ("per second: X"), styled differently when wrinklers suck CpS.
-    f64 cps = game_.cookiesPs * (1.0 - game_.cpsSucked);
-    std::string cpsStr = "per second: " + formatCookies(cps);
-    u32 cpsColor = game_.cpsSucked > 0.0 ? 0xFF6666FF : layout_.cpsColor;
-    drawTextCentered(x0, y0 + static_cast<i32>(static_cast<f32>(h) * layout_.cpsYFraction), w,
-                     cpsStr.c_str(), cpsColor, layout_.cpsScale, body);
+    // --- CPS "per second: X" (PT Sans, small) ---
+    std::string cpsStr = "per second: " + formatCookies(game_.cookiesPs);
+    f32 cw2 = render_.measureText(cpsStr.c_str(), layout_.cpsScale, body);
+    f32 cpsYc = static_cast<f32>(h) * layout_.cpsYFraction;
+    f32 cpsOff = render_.measureTextCenterY(cpsStr.c_str(), layout_.cpsScale, body);
+    f32 cpsY = cpsYc - cpsOff;
+    render_.drawText(static_cast<f32>(cx) - cw2 / 2.0f, cpsY,
+                     cpsStr.c_str(), layout_.cpsColor,
+                     layout_.cpsScale, body);
 
-    // Big cookie with soft glow behind it.
+    // --- big cookie with soft glow behind it ---
     f64 size = game_.bigCookieSizeValue();
     if (size < layout_.bigCookieMinSize) size = layout_.bigCookieMinSize;
     i32 cr = static_cast<i32>(layout_.bigCookieHalfSize * size);
-    i32 cx = x0 + w / 2;
-    i32 cy = y0 + static_cast<i32>(static_cast<f32>(h) * layout_.bigCookieYFraction);
+    i32 cy = static_cast<i32>(static_cast<f32>(h) * layout_.bigCookieYFraction);
+    // glow behind cookie
     f32 glowDia = static_cast<f32>(cr) * 2.0f * layout_.cookieGlowScale;
     render_.drawTexture(glowTex,
                         static_cast<f32>(cx) - glowDia / 2.0f,
@@ -196,364 +216,341 @@ void UI::drawCookieScreen(i32 x0, i32 y0) {
     render_.registerCookie(static_cast<f32>(cx), static_cast<f32>(cy),
                            static_cast<f32>(cr));
 
-    // Toasts stacked upward from the bottom-left of screen 1.
-    const InternalFont toastFont = InternalFont::Body;
-    f32 toastX = static_cast<f32>(x0) + layout_.toastX;
-    f32 toastY = static_cast<f32>(y0 + h) - 20.0f;
-    for (auto& t : toasts) {
-        f32 tw = render_.measureText(t.text.c_str(), layout_.toastScale, toastFont);
-        render_.drawRect(toastX - 4.0f, toastY - 4.0f,
-                         tw + 8.0f, 16.0f * layout_.toastScale + 8.0f,
-                         layout_.toastBgColor);
-        render_.drawText(toastX, toastY, t.text.c_str(),
-                         layout_.toastColor, layout_.toastScale, toastFont);
-        toastY -= layout_.toastSpacing;
-    }
-}
+    // ------------------------------------------------------------------
+    // Middle panel: game world view between cookie panel and store panel.
+    // A cookie strip with building sprites runs near the top, with a
+    // green grass field beneath it.
+    // ------------------------------------------------------------------
+    {
+        i32 mx = leftW;          // middle panel left edge
+        i32 mw = sx - leftW;     // middle panel width
 
-void UI::drawTabScreen(i32 x0, i32 y0) {
-    i32 w = layout_.screenW;
-    i32 h = layout_.screenH;
-    const InternalFont heading = InternalFont::Default;
-    const InternalFont body = InternalFont::Body;
-
-    render_.drawRect(static_cast<f32>(x0), static_cast<f32>(y0),
-                     static_cast<f32>(w), static_cast<f32>(h), layout_.screenBgColor);
-
-    // --- tab bar (bottom of screen 2): Buildings / Store / Menu ---
-    i32 tabY = y0 + h - layout_.tabBarH;
-    i32 tabW = w / 3;
-    static const char* const tabLabels[3] = {"Buildings", "Store", "Menu"};
-    for (i32 i = 0; i < 3; ++i) {
-        bool active = (tab_ == static_cast<ScreenTab>(i));
-        render_.drawRect(static_cast<f32>(x0 + i * tabW), static_cast<f32>(tabY),
-                         static_cast<f32>(tabW), static_cast<f32>(layout_.tabBarH),
-                         active ? layout_.tabActiveColor : layout_.tabBarColor);
-        f32 tw = render_.measureText(tabLabels[i], layout_.tabTextScale, body);
-        f32 ty = static_cast<f32>(tabY) + static_cast<f32>(layout_.tabBarH) / 2.0f
-            - render_.measureTextCenterY(tabLabels[i], layout_.tabTextScale, body);
-        render_.drawText(static_cast<f32>(x0 + i * tabW) + (static_cast<f32>(tabW) - tw) / 2.0f,
-                         ty, tabLabels[i],
-                         active ? layout_.tabTextActiveColor : layout_.tabTextColor,
-                         layout_.tabTextScale, body);
-        render_.registerButton(2000 + i, x0 + i * tabW, tabY, tabW, layout_.tabBarH);
-    }
-
-    // --- content area ---
-    f32 titleH = layout_.contentTitleScale * 16.0f;
-    i32 contentStart = y0 + layout_.contentTitleY + static_cast<i32>(titleH) + 10;
-    i32 contentBottom = tabY - 6;
-    i32 availH = contentBottom - contentStart;
-
-    i32 needH = static_cast<i32>(titleH) + 10 + contentHeight(contentStart);
-    i32 maxScroll = std::max(0, needH - availH);
-    if (scrollY_ > maxScroll) scrollY_ = maxScroll;
-    maxScroll_ = maxScroll;
-
-    if (tab_ != ScreenTab::Menu) menuRows_.clear();
-
-    const char* title =
-        tab_ == ScreenTab::Buildings ? "BUILDINGS" :
-        tab_ == ScreenTab::Store ? "STORE" : "MENU";
-    drawTextCentered(x0, y0 + layout_.contentTitleY, w, title,
-                     layout_.contentTitleColor, layout_.contentTitleScale, heading);
-
-    // Scroll arrows at the top-right / bottom-right of the content area.
-    i32 arX = x0 + w - layout_.arrowW - 4;
-    drawArrow(arX, y0 + 6, scrollY_ > 0, "^");
-    drawArrow(arX, contentBottom - layout_.arrowH, scrollY_ < maxScroll_, "v");
-    render_.registerButton(3000, arX, y0 + 6, layout_.arrowW, layout_.arrowH);
-    render_.registerButton(3001, arX, contentBottom - layout_.arrowH,
-                           layout_.arrowW, layout_.arrowH);
-
-    // Panel content (building/store rows or menu rows).
-    i32 padX = layout_.contentPadX;
-    i32 rowW = w - 2 * padX - layout_.arrowW - 8;
-    i32 contentRight = x0 + padX + rowW;
-    drawScreen2Content(x0, contentStart, contentBottom, contentRight, padX, rowW);
-}
-
-i32 UI::contentHeight(i32 contentStart) {
-    i32 y = contentStart;
-    switch (tab_) {
-    case ScreenTab::Buildings:
-    case ScreenTab::Store:
+        // Cookie strip: horizontal strip of building sprites.
+        // Draw each unlocked building's icon in a row.
+        f32 stripY = static_cast<f32>(layout_.middleCookieStripY)
+            * (static_cast<f32>(h) / 919.0f);
+        f32 stripH = static_cast<f32>(layout_.middleCookieStripH)
+            * (static_cast<f32>(h) / 919.0f);
+        f32 stripX = static_cast<f32>(mx) + 16.0f;
+        f32 iconSize = stripH * 0.8f;
+        f32 iconY = stripY + (stripH - iconSize) / 2.0f;
         for (auto& b : game_.objects) {
-            if (!b) continue;
-            if (tab_ == ScreenTab::Buildings && b->amount <= 0) continue;
-            y += layout_.rowH + layout_.rowGap;
+            if (!b || b->locked) continue;
+            std::string iconBase = b->art.base.empty() ? b->name : b->art.base;
+            for (auto& c : iconBase)
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            std::string iconPath = iconBase + ".png";
+            i32 iconHandle = loadIcon(iconPath);
+            f32 srcX = 0.0f, srcY = 0.0f, srcW = 0.0f, srcH = 0.0f;
+            if (iconPath == "cursor.png") {
+                srcX = 0.0f; srcY = 0.0f; srcW = 32.0f; srcH = 32.0f;
+            }
+            render_.drawTexture(iconHandle, stripX, iconY,
+                                iconSize, iconSize, 0xFFFFFFFF,
+                                srcX, srcY, srcW, srcH);
+            stripX += iconSize + 8.0f;
         }
-        return y - contentStart;
-    case ScreenTab::Menu:
-        return fillMenuRows(contentStart) - contentStart;
-    }
-    return 0;
-}
 
-i32 UI::fillMenuRows(i32 contentStart) {
-    menuRows_.clear();
-    i32 y = contentStart;
-    auto addRow = [&](MenuRow::Kind kind, const char* label,
-                      GameAction::Type action = GameAction::Type::None,
-                      const std::string& prefName = "", bool value = false) {
-        MenuRow row;
-        row.id = 4000 + static_cast<i32>(menuRows_.size());
-        row.kind = kind;
-        row.y = y;
-        row.label = label;
-        row.action = action;
-        row.prefName = prefName;
-        row.value = value;
-        menuRows_.push_back(row);
-        y += layout_.menuItemH;
+        // Grass field: green field below the strip.
+        f32 grassY = static_cast<f32>(layout_.middleGrassY)
+            * (static_cast<f32>(h) / 919.0f);
+        f32 grassH = static_cast<f32>(h) - grassY;
+        render_.drawRect(static_cast<f32>(mx), grassY,
+                         static_cast<f32>(mw), grassH,
+                         layout_.grassColor);
+    }
+
+    // ------------------------------------------------------------------
+    // Top menu bar: wooden-plank Options/Stats buttons on the left,
+    // news ticker in the centre, Info/Legacy buttons on the right.
+    // Spans from the left panel's right edge to the right edge of the
+    // window (above the middle + store area).
+    // ------------------------------------------------------------------
+    auto drawWoodStrip = [&](f32 x, f32 y, f32 wid, f32 hei) {
+        if (pvW2 <= 0 || panelHorizTex == 0) return;
+        i32 phH = 0;
+        render_.textureSize(panelHorizTex, nullptr, &phH);
+        if (phH <= 0) phH = 16;
+        i32 rows = static_cast<i32>(std::ceil(hei / static_cast<f32>(phH)));
+        for (i32 r = 0; r < rows; ++r) {
+            f32 ry = y + static_cast<f32>(r) * static_cast<f32>(phH);
+            f32 rh = std::min(static_cast<f32>(phH), hei - (ry - y));
+            render_.drawTextureTiled(panelHorizTex, x, ry, wid, rh,
+                                     layout_.topBarColor, 0);
+        }
     };
 
-    if (menu_ == MenuScreen::None) {
-        addRow(MenuRow::Kind::Picker, "Options");
-        addRow(MenuRow::Kind::Picker, "Stats");
-        addRow(MenuRow::Kind::Picker, "Info");
-    } else if (menu_ == MenuScreen::Options) {
-        addRow(MenuRow::Kind::Action, "Save", GameAction::Type::SaveGame);
-        addRow(MenuRow::Kind::Action, "Export");
-        addRow(MenuRow::Kind::Action, "Import");
-        addRow(MenuRow::Kind::Action, "Wipe save", GameAction::Type::WipeSave);
-        addRow(MenuRow::Kind::Toggle, "Particles", GameAction::Type::None, "particles",
-               game_.getPref("particles"));
-        addRow(MenuRow::Kind::Toggle, "Numbers", GameAction::Type::None, "numbers",
-               game_.getPref("numbers"));
-        addRow(MenuRow::Kind::Toggle, "Short numbers", GameAction::Type::None, "format",
-               game_.getPref("format"));
-        addRow(MenuRow::Kind::Toggle, "Wobbly cookie", GameAction::Type::None, "wobbly",
-               game_.getPref("wobbly"));
-        addRow(MenuRow::Kind::Toggle, "Fast notes", GameAction::Type::None, "notifs",
-               game_.getPref("notifs"));
-    } else if (menu_ == MenuScreen::Stats) {
-        i32 buildingsOwned = 0;
-        for (auto& b : game_.objects)
-            if (b) buildingsOwned += b->amount;
-        addRow(MenuRow::Kind::Picker,
-               ("Cookies in bank: " + formatCookies(game_.cookies)).c_str());
-        addRow(MenuRow::Kind::Picker,
-               ("Cookies baked (run): " + formatCookies(game_.cookiesEarned)).c_str());
-        addRow(MenuRow::Kind::Picker,
-               ("Cookies baked (all time): " +
-                formatCookies(game_.cookiesEarned + game_.cookiesReset)).c_str());
-        if (game_.cookiesReset > 0.0) {
-            addRow(MenuRow::Kind::Picker,
-                   ("Cookies forfeited: " + formatCookies(game_.cookiesReset)).c_str());
-        }
-        addRow(MenuRow::Kind::Picker,
-               ("Buildings owned: " + std::to_string(buildingsOwned)).c_str());
-        addRow(MenuRow::Kind::Picker,
-               ("Cookies per second: " + formatCookies(game_.cookiesPs)).c_str());
-        addRow(MenuRow::Kind::Picker,
-               ("Cookies per click: " + formatCookies(game_.computedMouseCps)).c_str());
-        addRow(MenuRow::Kind::Picker,
-               ("Cookie clicks: " + std::to_string(game_.cookieClicks)).c_str());
-        addRow(MenuRow::Kind::Picker,
-               ("Golden clicks: " + std::to_string(game_.goldenClicksLocal)).c_str());
-        addRow(MenuRow::Kind::Picker, "Version: v2.058");
-    } else if (menu_ == MenuScreen::Info) {
-        addRow(MenuRow::Kind::Picker, "Cookie Clicker");
-        addRow(MenuRow::Kind::Picker, "C++ port of v2.058");
-        addRow(MenuRow::Kind::Picker, "Original game: Orteil / DashNet");
-        addRow(MenuRow::Kind::Picker, "Target: Nintendo DSi");
-        addRow(MenuRow::Kind::Picker, "Two 256x192 screens");
+    auto buttonRightEdge = [&](i32 relX, i32 relW) {
+        return static_cast<f32>(sx + storeW - relX - relW);
+    };
+
+    // Per-button wood strips only (no continuous background strip).
+    // Each button gets its own wood plank background; the news ticker area
+    // between them stays dark.
+
+    // Left column: Options on top, Stats below.
+    {
+        // Options button (top-left corner).
+        f32 bx = static_cast<f32>(leftW + layout_.btnOptionsX);
+        f32 by = static_cast<f32>(layout_.topBtnY);
+        drawWoodStrip(bx, by, static_cast<f32>(layout_.btnOptionsW),
+                      static_cast<f32>(layout_.topBtnH));
+        render_.drawText(bx + layout_.btnPadX, by + layout_.topBtnH / 2.0f,
+                         "Options", 0xFFFFFFFF, layout_.newsTickerScale, body);
+        // Stats button directly below Options.
+        f32 sx2 = static_cast<f32>(leftW + layout_.btnStatsX);
+        f32 sy2 = static_cast<f32>(layout_.topBtnY + layout_.topBtnH + 4.0f);
+        drawWoodStrip(sx2, sy2, static_cast<f32>(layout_.btnStatsW),
+                      static_cast<f32>(layout_.topBtnH));
+        render_.drawText(sx2 + layout_.btnPadX, sy2 + layout_.topBtnH / 2.0f,
+                         "Stats", 0xFFFFFFFF, layout_.newsTickerScale, body);
     }
-    return y;
-}
+    // Right column: Info on top, Legacy below.
+    {
+        // Info button (top-right corner).
+        f32 bx = buttonRightEdge(layout_.btnInfoX, layout_.btnInfoW);
+        f32 by = static_cast<f32>(layout_.topBtnY);
+        drawWoodStrip(bx, by, static_cast<f32>(layout_.btnInfoW),
+                      static_cast<f32>(layout_.topBtnH));
+        render_.drawText(bx + layout_.btnPadX, by + layout_.topBtnH / 2.0f,
+                         "Info", 0xFFFFFFFF, layout_.newsTickerScale, body);
+        // Legacy button directly below Info.
+        f32 lx2 = buttonRightEdge(layout_.btnLegacyX, layout_.btnLegacyW);
+        f32 ly2 = static_cast<f32>(layout_.topBtnY + layout_.topBtnH + 4.0f);
+        drawWoodStrip(lx2, ly2, static_cast<f32>(layout_.btnLegacyW),
+                      static_cast<f32>(layout_.topBtnH));
+        render_.drawText(lx2 + layout_.btnPadX, ly2 + layout_.topBtnH / 2.0f,
+                         "Legacy", 0xFFFFFFFF, layout_.newsTickerScale, body);
+    }
+    // news ticker area (centered between the left and right button groups)
+    {
+        f32 leftEdge = static_cast<f32>(leftW + layout_.btnOptionsX + layout_.btnOptionsW + layout_.btnGap);
+        f32 rightEdge = buttonRightEdge(layout_.btnInfoX, layout_.btnInfoW);
+        f32 tw = rightEdge - leftEdge;
+        if (tw > 0) {
+            // Get current ticker message from Game core.
+            std::string tickerText = game_.tickerMessage();
+            bool isFortune = game_.tickerIsFortune();
+            u32 tickerColor = isFortune ? 0xFFD700FF : layout_.newsTickerColor; // gold for fortunes
+            f32 twText = render_.measureText(tickerText.c_str(), layout_.newsTickerScale, body);
+            f32 tx = leftEdge + (tw - twText) / 2.0f;
+            // news ticker: plain dark strip behind the scrolling text
+            render_.drawRect(leftEdge, static_cast<f32>(layout_.topBarY + 10),
+                             tw, static_cast<f32>(layout_.topBarH - 20), 0x00000080);
+            render_.drawText(tx, static_cast<f32>(layout_.newsTickerY),
+                             tickerText.c_str(), tickerColor,
+                             layout_.newsTickerScale, body);
+            // Cache ticker rect for hit-testing (fortune clicks).
+            tickerRectX = static_cast<i32>(leftEdge);
+            tickerRectY = static_cast<i32>(layout_.topBarY + 10);
+            tickerRectW = static_cast<i32>(tw);
+            tickerRectH = static_cast<i32>(layout_.topBarH - 20);
+        } else {
+            tickerRectW = 0;
+        }
+    }
 
-void UI::drawScreen2Content(i32 x0, i32 contentTop, i32 contentBottom,
-                            i32 contentRight, i32 padX, i32 rowW) {
-    const InternalFont body = InternalFont::Body;
-    i32 rowY = contentTop - scrollY_;
+    // ------------------------------------------------------------------
+    // Right panel: store column. Store title, upgrades row, Buy/Sell toggle
+    // with 1/10/100, then contiguous store rows (no separators / frames).
+    // Store panel width is a fraction of the window; content is scaled by
+    // storeW / 304 (the real store panel width in px at 1920px window width)
+    // so it stays proportional. Row Y positions use height fractions.
+    // ------------------------------------------------------------------
+    f32 storeWf = static_cast<f32>(storeW);
+    f32 storeScale = storeWf / 304.0f;   // real store column was ~304px wide
+    auto SX = [&](i32 basePx) { return static_cast<f32>(sx) + static_cast<f32>(basePx) * storeScale; };
+    auto SY = [&](i32 basePx) { return static_cast<f32>(basePx) * (static_cast<f32>(h) / 919.0f); };
+    auto SCALE = [&](f32 base) { return base * storeScale; };
 
-    if (tab_ == ScreenTab::Buildings || tab_ == ScreenTab::Store) {
-        bool storeMode = (tab_ == ScreenTab::Store);
-        for (i32 i = 0; i < static_cast<i32>(game_.objects.size()); ++i) {
+    render_.drawText(SX(layout_.storeTitleX), SY(layout_.storeTitleY), "STORE",
+                     layout_.storeTitleColor, SCALE(layout_.storeTitleScale), heading);
+
+    // Upgrades row (icon slots) beneath the STORE title.
+    // Each slot shows a building icon; the first unlocked building is highlighted.
+    i32 firstUnlocked = -1;
+    for (i32 i = 0; i < static_cast<i32>(game_.objects.size()); ++i) {
+        if (game_.objects[i] && !game_.objects[i]->locked) { firstUnlocked = i; break; }
+    }
+    for (i32 i = 0; i < 6; ++i) {
+        f32 gx = SX(layout_.upgradeSlotX)
+            + static_cast<f32>(i) * SCALE(static_cast<f32>(layout_.upgradeSlotW + layout_.upgradeSlotGap));
+        f32 gy = SY(layout_.upgradesY);
+        f32 gw = SCALE(static_cast<f32>(layout_.upgradeSlotW));
+        f32 gh = SCALE(static_cast<f32>(layout_.upgradeSlotH));
+        // Slot background: highlighted if this is the first unlocked building's slot.
+        bool highlight = (firstUnlocked >= 0 && i == 0);
+        render_.drawRect(gx, gy, gw, gh, highlight ? layout_.buySellActive : 0x4A4A4AFF);
+        render_.drawRect(gx + 1.0f, gy + 1.0f, gw - 2.0f, gh - 2.0f, 0x222222FF);
+        // Draw the building icon for this slot.
+        if (i < static_cast<i32>(game_.objects.size()) && game_.objects[i]) {
             auto& b = game_.objects[i];
-            if (!b) continue;
-            if (!storeMode && b->amount <= 0) continue;
-
-            bool locked = b->locked;
-            bool affordable = game_.cookies >= b->getPrice();
-            bool enabled = !locked && affordable;
-
-            f32 drawY = static_cast<f32>(rowY);
-            bool visible = drawY + static_cast<f32>(layout_.rowH) > static_cast<f32>(contentTop) &&
-                           drawY < static_cast<f32>(contentBottom);
-            if (visible) {
-                // Row background.
-                render_.drawRect(static_cast<f32>(x0 + padX), drawY,
-                                 static_cast<f32>(rowW), static_cast<f32>(layout_.rowH),
-                                 enabled ? layout_.rowHighlightColor : layout_.rowBgColor);
-
-                // Building icon (dark silhouette when locked).
-                f32 iconX = static_cast<f32>(x0 + padX + layout_.rowIconX);
-                f32 iconY = drawY + (static_cast<f32>(layout_.rowH) - layout_.rowIconSize) / 2.0f;
-                if (!locked) {
-                    std::string iconBase = b->art.base.empty() ? b->name : b->art.base;
-                    for (auto& c : iconBase)
-                        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-                    std::string iconPath = iconBase + ".png";
-                    i32 iconHandle = loadIcon(iconPath);
-                    f32 srcX = 0.0f, srcY = 0.0f, srcW = 0.0f, srcH = 0.0f;
-                    if (iconPath == "cursor.png") {
-                        srcX = 0.0f; srcY = 0.0f; srcW = 32.0f; srcH = 32.0f;
-                    }
-                    u32 iconColor = enabled ? 0xFFFFFFFF : 0x888888FF;
-                    render_.drawTexture(iconHandle, iconX, iconY,
-                                        static_cast<f32>(layout_.rowIconSize),
-                                        static_cast<f32>(layout_.rowIconSize),
-                                        iconColor, srcX, srcY, srcW, srcH);
-                } else {
-                    f32 pad = 4.0f;
-                    render_.drawRect(iconX + pad, iconY + pad,
-                                     static_cast<f32>(layout_.rowIconSize) - 2.0f * pad,
-                                     static_cast<f32>(layout_.rowIconSize) - 2.0f * pad,
-                                     layout_.rowLockedColor);
-                }
-
-                // Name ("???" when locked).
-                std::string name = locked ? "???" : b->name;
-                f32 nameX = iconX + static_cast<f32>(layout_.rowIconSize) + 4.0f;
-                u32 nameColor = enabled ? layout_.rowNameColor : layout_.rowNameColorLocked;
-                render_.drawText(nameX,
-                                 drawY + static_cast<f32>(layout_.rowH) / 2.0f
-                                     - render_.measureTextCenterY(name.c_str(), layout_.rowNameScale, body),
-                                 name.c_str(), nameColor, layout_.rowNameScale, body);
-
-                if (!locked) {
-                    // Owned count ("xN") right after the name.
-                    if (b->amount > 0) {
-                        std::string owned = "x" + std::to_string(b->amount);
-                        f32 nw = render_.measureText(name.c_str(), layout_.rowNameScale, body);
-                        f32 ow = render_.measureText(owned.c_str(), layout_.rowPriceScale, body);
-                        render_.drawText(nameX + nw + 4.0f,
-                                         drawY + static_cast<f32>(layout_.rowH) / 2.0f
-                                             - render_.measureTextCenterY(owned.c_str(),
-                                                                          layout_.rowPriceScale, body),
-                                         owned.c_str(), layout_.rowOwnedColor,
-                                         layout_.rowPriceScale, body);
-                    }
-                    // Price right-aligned.
-                    std::string priceStr = formatCookies(b->getPrice());
-                    f32 pw = render_.measureText(priceStr.c_str(), layout_.rowPriceScale, body);
-                    u32 priceColor = affordable ? layout_.rowPriceColorAfford : layout_.rowPriceColorNot;
-                    render_.drawText(static_cast<f32>(contentRight) - pw,
-                                     drawY + static_cast<f32>(layout_.rowH) / 2.0f
-                                         - render_.measureTextCenterY(priceStr.c_str(),
-                                                                      layout_.rowPriceScale, body),
-                                     priceStr.c_str(), priceColor, layout_.rowPriceScale, body);
-
-                    // Click the row to buy one (Game validates affordability).
-                    if (enabled) {
-                        render_.registerButton(1000 + i, x0 + padX,
-                                               static_cast<i32>(drawY), rowW, layout_.rowH);
-                    }
-                }
+            std::string iconBase = b->art.base.empty() ? b->name : b->art.base;
+            for (auto& c : iconBase)
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            std::string iconPath = iconBase + ".png";
+            i32 iconHandle = loadIcon(iconPath);
+            f32 srcX = 0.0f, srcY = 0.0f, srcW = 0.0f, srcH = 0.0f;
+            if (iconPath == "cursor.png") {
+                srcX = 0.0f; srcY = 0.0f; srcW = 32.0f; srcH = 32.0f;
             }
-            rowY += layout_.rowH + layout_.rowGap;
-        }
-    } else {
-        // Menu tab: Options / Stats / Info rows (menuRows_ filled by contentHeight()).
-        for (auto& row : menuRows_) {
-            f32 drawY = static_cast<f32>(row.y - scrollY_);
-            if (drawY + static_cast<f32>(layout_.menuItemH) < static_cast<f32>(contentTop) ||
-                drawY > static_cast<f32>(contentBottom))
-                continue;
-            render_.drawRect(static_cast<f32>(x0 + padX), drawY,
-                             static_cast<f32>(rowW), static_cast<f32>(layout_.menuItemH),
-                             layout_.menuItemBg);
-            f32 tx = static_cast<f32>(x0 + padX)
-                + (row.kind == MenuRow::Kind::Toggle ? 20.0f : 0.0f);
-            render_.drawText(tx,
-                             drawY + static_cast<f32>(layout_.menuItemH) / 2.0f
-                                 - render_.measureTextCenterY(row.label.c_str(),
-                                                              layout_.menuTextScale, body),
-                             row.label.c_str(), layout_.menuTextColor,
-                             layout_.menuTextScale, body);
-            if (row.kind == MenuRow::Kind::Toggle) {
-                i32 cb = 14;
-                f32 cbY = drawY + (static_cast<f32>(layout_.menuItemH) - cb) / 2.0f;
-                render_.drawRect(static_cast<f32>(x0 + padX), cbY,
-                                 static_cast<f32>(cb), static_cast<f32>(cb),
-                                 row.value ? layout_.checkboxOn : layout_.checkboxOff);
-                if (!row.value) {
-                    render_.drawRect(static_cast<f32>(x0 + padX) + 1.0f, cbY + 1.0f,
-                                     static_cast<f32>(cb) - 2.0f, static_cast<f32>(cb) - 2.0f,
-                                     layout_.screenBgColor);
-                }
-            }
-            render_.registerButton(row.id, x0 + padX, static_cast<i32>(drawY),
-                                     rowW, layout_.menuItemH);
+            f32 iconS = gw * 0.75f;
+            render_.drawTexture(iconHandle, gx + (gw - iconS) / 2.0f, gy + (gh - iconS) / 2.0f,
+                                iconS, iconS, b->locked ? 0x888888FF : 0xFFFFFFFF,
+                                srcX, srcY, srcW, srcH);
         }
     }
-}
 
-GameAction UI::handleMenuRow(i32 index) {
-    if (index < 0 || index >= static_cast<i32>(menuRows_.size()))
-        return GameAction{GameAction::Type::None, -1};
-    MenuRow& row = menuRows_[static_cast<size_t>(index)];
-    switch (row.kind) {
-    case MenuRow::Kind::Picker:
-        if (row.label == "Options") menu_ = MenuScreen::Options;
-        else if (row.label == "Stats") menu_ = MenuScreen::Stats;
-        else menu_ = MenuScreen::Info;
-        scrollY_ = 0;
-        break;
-    case MenuRow::Kind::Toggle:
-        return GameAction{GameAction::Type::TogglePref, -1, row.prefName};
-    case MenuRow::Kind::Action:
-        if (row.action == GameAction::Type::SaveGame)
-            return GameAction{GameAction::Type::SaveGame};
-        if (row.action == GameAction::Type::WipeSave)
-            return GameAction{GameAction::Type::WipeSave};
-        // Export / Import: file operations not implemented on this port yet.
-        notify("Not implemented yet");
-        break;
+    // Buy / Sell toggle + bulk labels.
+    {
+        f32 btx = SX(layout_.storeTitleX);
+        f32 bty = SY(layout_.buySellY);
+        f32 bw = SCALE(static_cast<f32>(layout_.buySellW));
+        f32 bh = SCALE(static_cast<f32>(layout_.buySellH));
+        f32 halfW = bw / 2.0f;
+        // "Buy" button (left half).
+        render_.drawRect(btx, bty, halfW, bh, layout_.buySellActive);
+        render_.drawText(btx + SCALE(4.0f), bty + bh / 2.0f, "Buy", 0x000000FF, SCALE(0.9f), body);
+        // "Sell" button (right half).
+        render_.drawRect(btx + halfW, bty, halfW, bh, layout_.buySellColor);
+        render_.drawText(btx + halfW + SCALE(4.0f), bty + bh / 2.0f, "Sell", 0x000000FF, SCALE(0.9f), body);
+        f32 blx = btx + bw + SCALE(static_cast<f32>(layout_.bulkGap));
+        render_.drawText(blx, SY(layout_.bulkY), "1", layout_.bulkColor, SCALE(layout_.bulkScale), body);
+        render_.drawText(blx + SCALE(24.0f), SY(layout_.bulkY), "10", layout_.bulkColor, SCALE(layout_.bulkScale), body);
+        render_.drawText(blx + SCALE(52.0f), SY(layout_.bulkY), "100", layout_.bulkColor, SCALE(layout_.bulkScale), body);
     }
-    return GameAction{GameAction::Type::None, -1};
+
+    // Store rows (contiguous: rowHeight == rowStep, no separators).
+    if (!storeTileTex) storeTileTex = render_.loadTexture("storeTile.png");
+    f32 rowY = SY(layout_.storeFirstRowY);
+    f32 rowStep = SCALE(static_cast<f32>(layout_.storeRowHeight));
+    i32 row = 0;
+    for (auto& b : game_.objects) {
+        if (!b) continue;
+        if (rowY + rowStep > static_cast<f32>(h)) break;
+
+        bool canAfford = game_.cookies >= b->getPrice();
+        if (!b->locked && game_.cookiesEarned >= b->basePrice) {
+            // already unlocked
+        } else if (game_.cookiesEarned >= b->basePrice) {
+            b->locked = false;
+        }
+        bool isLocked = b->locked;
+        bool isEnabled = canAfford && !isLocked;
+
+        f32 cellW = SCALE(static_cast<f32>(layout_.storeTileWidth));
+        f32 cellH = rowStep;
+        f32 cellX = static_cast<f32>(sx) + (storeW - cellW) / 2.0f;
+        u32 tileColor = isEnabled ? layout_.tileColorEnabled : layout_.tileColorDisabled;
+        // No row separator / frame: just a flat row background.
+        render_.drawRect(cellX, rowY, cellW, cellH, tileColor);
+
+        // Building icon (only visible when unlocked; dark silhouette when locked).
+        f32 iconW = SCALE(static_cast<f32>(layout_.storeIconSize));
+        if (!isLocked) {
+            std::string iconBase = b->art.base.empty() ? b->name : b->art.base;
+            for (auto& c : iconBase)
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            std::string iconPath = iconBase + ".png";
+            i32 iconHandle = loadIcon(iconPath);
+            f32 srcX = 0.0f, srcY = 0.0f, srcW = 0.0f, srcH = 0.0f;
+            if (iconPath == "cursor.png") {
+                srcX = 0.0f; srcY = 0.0f; srcW = 32.0f; srcH = 32.0f;
+            }
+            render_.drawTexture(iconHandle,
+                                SX(layout_.storeIconX), rowY,
+                                iconW, iconW, 0xFFFFFFFF, srcX, srcY, srcW, srcH);
+        } else {
+            // Dark shadowed silhouette for locked items.
+            f32 pad = SCALE(12.0f);
+            render_.drawRect(SX(layout_.storeIconX) + pad, rowY + pad,
+                             iconW - 2.0f * pad, iconW - 2.0f * pad,
+                             layout_.storeLockedColor);
+        }
+
+        // Building name / "???" hint (large).
+        std::string displayName = isLocked ? "???" : b->name;
+        u32 nameColor = isEnabled ? layout_.storeNameColorEnabled : layout_.storeNameColorDisabled;
+        f32 nameScale = SCALE(layout_.storeNameScale);
+        f32 nameX = SX(layout_.storeNameX);
+        f32 nameY = rowY + SCALE(8.0f);
+        render_.drawText(nameX, nameY, displayName.c_str(), nameColor, nameScale, body);
+
+        // Price stacked below the name, with a small cookie icon before it.
+        std::string priceStr = formatCookies(b->getPrice());
+        f32 pw = render_.measureText(priceStr.c_str(), SCALE(layout_.storePriceScale), body);
+        u32 priceColor = isEnabled ? layout_.storePriceColorAffordable : layout_.storePriceColorNot;
+        f32 priceY = nameY + nameScale * SCALE(15.0f) + SCALE(3.0f);
+        f32 priceRight = static_cast<f32>(sx + storeW) - SCALE(static_cast<f32>(layout_.storeOwnedRightMargin));
+        f32 priceIconW = 0.0f, priceIconH = 0.0f;
+        i32 priceIconWi = 0, priceIconHi = 0;
+        render_.textureSize(priceCookieTex, &priceIconWi, &priceIconHi);
+        if (priceIconWi > 0 && priceIconHi > 0) {
+            priceIconW = static_cast<f32>(priceIconWi);
+            priceIconH = static_cast<f32>(priceIconHi);
+            f32 iconScale = SCALE(14.0f) / priceIconW;
+            f32 iconDrawW = priceIconW * iconScale;
+            f32 iconDrawH = priceIconH * iconScale;
+            f32 iconY = priceY + (SCALE(14.0f) - iconDrawH) / 2.0f;
+            render_.drawTexture(priceCookieTex,
+                                priceRight - pw - iconDrawW - SCALE(static_cast<f32>(layout_.storePriceIconGap)),
+                                iconY, iconDrawW, iconDrawH, priceColor);
+        }
+        render_.drawText(priceRight - pw, priceY, priceStr.c_str(),
+                         priceColor, SCALE(layout_.storePriceScale), body);
+
+        // Big faded owned amount on the right.
+        if (b->amount > 0) {
+            std::string ownedStr = std::to_string(b->amount);
+            const f32 scale = SCALE(layout_.storeOwnedScale);
+            f32 ow = render_.measureText(ownedStr.c_str(), scale, body);
+            f32 ownedX = priceRight - ow;
+            f32 ownedY = rowY + cellH / 2.0f
+                - render_.measureTextCenterY(ownedStr.c_str(), scale, body);
+            render_.drawText(ownedX, ownedY, ownedStr.c_str(),
+                             layout_.storeOwnedColor, scale, body);
+        }
+
+        // Click anywhere in the row to buy (no separate BUY button).
+        render_.registerButton(1000 + row, static_cast<f32>(sx),
+                               rowY, storeW, cellH);
+
+        rowY += rowStep; // contiguous (no gap, no separator)
+        ++row;
+    }
+
+    // --- toasts (skeleton): draw stacked upward from bottom-left of cookie panel
+    if (!toasts.empty()) {
+        f32 toastY = static_cast<f32>(h) - 40.0f;
+        for (auto& t : toasts) {
+            f32 tw = render_.measureText(t.text.c_str(), layout_.toastScale, body);
+            render_.drawRect(layout_.toastX - 4.0f, toastY - 4.0f,
+                             tw + 8.0f, static_cast<f32>(16 * layout_.toastScale) + 8.0f,
+                             layout_.toastBgColor);
+            render_.drawText(layout_.toastX, toastY, t.text.c_str(),
+                             layout_.toastColor, layout_.toastScale, body);
+            toastY -= layout_.toastSpacing;
+        }
+    }
 }
 
 GameAction UI::on_pointer(i32 x, i32 y) {
     i32 hit = render_.hitTest(x, y);
-
     if (hit == Render::HIT_COOKIE) {
         return GameAction{GameAction::Type::ClickCookie, -1};
     }
-
-    // Screen 2 tabs: switching tabs closes any open submenu.
-    if (hit >= 2000 && hit < 3000) {
-        tab_ = static_cast<ScreenTab>(hit - 2000);
-        menu_ = MenuScreen::None;
-        scrollY_ = 0;
-        menuRows_.clear();
-        return GameAction{GameAction::Type::None, -1};
-    }
-
-    // Scroll arrows.
-    if (hit == 3000) {
-        scrollY_ = std::max(0, scrollY_ - layout_.rowH);
-        return GameAction{GameAction::Type::None, -1};
-    }
-    if (hit == 3001) {
-        scrollY_ = std::min(maxScroll_, scrollY_ + layout_.rowH);
-        return GameAction{GameAction::Type::None, -1};
-    }
-
-    // Menu rows (only meaningful on the Menu tab).
-    if (tab_ == ScreenTab::Menu && hit >= 4000 &&
-        hit < 4000 + static_cast<i32>(menuRows_.size())) {
-        return handleMenuRow(hit - 4000);
-    }
-
-    // Store / building rows: buy one building. Game validates affordability.
-    if (hit >= Render::HIT_BUILDING_BASE && hit < 2000) {
+    if (hit >= Render::HIT_BUILDING_BASE) {
         i32 idx = hit - Render::HIT_BUILDING_BASE;
         if (idx >= 0 && idx < static_cast<i32>(game_.objects.size())) {
             return GameAction{GameAction::Type::BuyBuilding, idx};
         }
+    }
+    // Ticker fortune click: only when ticker area is hit AND current message is a fortune.
+    if (tickerRectW > 0 &&
+        x >= tickerRectX && x < tickerRectX + tickerRectW &&
+        y >= tickerRectY && y < tickerRectY + tickerRectH &&
+        game_.tickerIsFortune()) {
+        return GameAction{GameAction::Type::ClickFortune, -1};
     }
     return GameAction{GameAction::Type::None, -1};
 }

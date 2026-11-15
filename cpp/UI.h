@@ -11,30 +11,18 @@
 // ---------------------------------------------------------------------------
 // UI layer — owns all layout, drawing, and hit-testing.
 //
-// This port targets the DSi (two 256x192 screens) and follows the original's
-// `.mobile` single-panel layout: screen 1 shows the Cookie panel, screen 2
-// shows a tabbed Buildings / Store / Menu view. All layout numbers live in
-// Layout so the drawing code never contains inline geometry.
-//
 // Game supplies state (const Game&). Render supplies platform primitives.
 // UI never mutates Game. User input is reported back as a GameAction and the
-// main loop applies it to Game. Menu state (which tab/menu is open) lives in
-// the UI, not in Game.
+// main loop applies it to Game.
+//
+// All layout numbers live in Layout so a platform (e.g. DSi two-screen) can
+// supply a different Layout without touching drawing code.
 // ---------------------------------------------------------------------------
 
 struct GameAction {
-    enum class Type : i32 {
-        None,
-        ClickCookie,    // screen 1: click the big cookie
-        BuyBuilding,    // screen 2: buy a building; buildingIndex into Game::objects
-        ClickFortune,   // ticker fortune click (not used in the .mobile layout)
-        TogglePref,     // toggle a Game preference; prefName names it
-        SaveGame,       // trigger a manual save
-        WipeSave,       // hard reset
-    };
+    enum class Type : i32 { None, ClickCookie, BuyBuilding, ClickFortune };
     Type type = Type::None;
     i32 buildingIndex = -1; // index into Game::objects (BuyBuilding only)
-    std::string prefName;   // preference name (TogglePref only)
 };
 
 // A transient on-screen notification (toast). Skeleton: data + lifecycle
@@ -44,118 +32,188 @@ struct Toast {
     std::string text;
     f32 life = 0.0f;      // seconds remaining
     f32 maxLife = 0.0f;   // total lifetime
+    f32 y = 0.0f;         // screen y (top-down), set when spawned
     bool active = false;
 };
 
-// Every position / size / spacing used by the UI. Values mirror the original
-// game's .mobile layout scaled to the DSi's two 256x192 screens. A different
-// platform can supply its own Layout and reuse the same drawing code.
+// Every position / size / spacing used by the UI. Values mirror the current
+// Game::draw() exactly so this refactor stays pixel-identical. A DSi/3DS port
+// can supply its own Layout and reuse the same drawing code.
+// Every position / size / spacing used by the UI. Values mirror the real
+// Cookie Clicker (v2.058) layout measured from screenshots/refs/real_game.png
+// (1920x919) and scaled to the 900x600 desktop window. A DSi/3DS port can
+// supply its own Layout and reuse the same drawing code.
+// ---------------------------------------------------------------------------
 struct Layout {
-    // --- DSi dual-screen geometry -------------------------------------------
-    // Two 256x192 screens stacked vertically (top = Cookie, bottom = tabbed
-    // Buildings / Store / Menu) with a bezel gap between them.
-    i32 screenW = 256;
-    i32 screenH = 192;
-    i32 screenGap = 24;
+    // --- panels ------------------------------------------------------------
+    f32 leftPanelWidthFraction = 0.30f; // #sectionLeft width (fraction of window)
+    i32 storePanelWidth = 318;          // #sectionRight / #store width (px)
 
-    // screen 1 (top): Cookie panel ------------------------------------------
-    f32 bakeryYFraction = 0.09f;   // bakery name visual centre (fraction of screen height)
-    f32 bakeryScale = 0.55f;
-    u32 bakeryColor = 0xE8E8E8FF;
+    // --- top menu bar (wooden plank strip spanning from the left panel's
+    //     right edge to the right edge, above the middle + store area) ----
+    i32 topBarY = 0;                    // strip top
+    i32 topBarH = 80;                   // strip height
+    u32 topBarColor = 0xFFFFFFFF;       // wood tint
 
-    f32 cookieCountYFraction = 0.30f;
-    f32 cookieCountScale = 0.9f;
+    i32 topBtnY = 26;                   // button top within the strip
+    i32 topBtnH = 34;                   // button height
+    i32 btnPadX = 14;                   // text padding inside a button
+    i32 btnGap = 10;                    // gap between buttons / ticker
+
+    // Button x positions are relative to the left panel's right edge (leftW)
+    // for Options/Stats, or relative to the right edge for Info/Legacy.
+    // Layout matches Image 2: Options+Stats stacked top-left,
+    // Info+Legacy stacked top-right.
+    i32 btnOptionsX = 16;
+    i32 btnOptionsW = 110;
+    i32 btnStatsX = 16;
+    i32 btnStatsW = 110;
+    i32 btnInfoX = 16;                  // from right edge: storeX + storeW - x - w
+    i32 btnInfoW = 90;
+    i32 btnLegacyX = 16;                // from right edge
+    i32 btnLegacyW = 90;
+
+    i32 newsTickerY = 44;               // news ticker baseline
+    f32 newsTickerScale = 0.85f;
+    u32 newsTickerColor = 0xDDDDDDFF;
+
+    // --- cookie panel (left) ----------------------------------------------
+    // Rounded banner with the bakery name (Kavoon heading).
+    // bakeryYFraction is the banner visual-centre position (fraction of height).
+    f32 bakeryYFraction = 0.097f;
+    f32 bakeryScale = 0.7f;
+    u32 bakeryColor = 0xF5F5F5FF;
+    u32 bannerColor = 0x2A2A3AFF;       // banner background fill
+    u32 bannerOutline = 0x8A8A8AFF;
+    f32 bannerPadX = 10.0f;
+    f32 bannerPadY = 3.0f;
+    f32 bannerRadius = 6.0f;
+
+    // "N cookies" large (PT Sans body). cookieCountYFraction is the visual centre.
+    f32 cookieCountYFraction = 0.141f;
+    f32 cookieCountScale = 1.1f;
     u32 cookieCountColor = 0xFFFFFFFF;
 
-    f32 cpsYFraction = 0.47f;
+    // "per second: X" small beneath the count. cpsYFraction is the visual centre.
+    f32 cpsYFraction = 0.163f;
     f32 cpsScale = 0.55f;
     u32 cpsColor = 0xC8C8C8FF;
 
-    f32 bigCookieYFraction = 0.80f;
-    f32 bigCookieHalfSize = 40.0f; // cookie radius at scale 1.0 (px)
-    f32 bigCookieMinSize = 0.5f;
-    f32 cookieGlowScale = 2.6f;    // glow diameter / cookie diameter
+    // big cookie (#bigCookie). Centered in the left panel.
+    f32 bigCookieYFraction = 0.388f;
+    f32 bigCookieHalfSize = 40.0f;   // half-width at scale 1.0 (matches real-game proportion)
+    f32 bigCookieMinSize = 0.4f;
 
-    // screen 2 (bottom): tab bar --------------------------------------------
-    i32 tabBarH = 40;
-    u32 tabBarColor = 0x2A2A3AFF;   // inactive tab background
-    u32 tabActiveColor = 0xFFD700FF; // active tab background / accent
-    u32 tabTextColor = 0xE0E0E0FF;
-    u32 tabTextActiveColor = 0x000000FF;
-    f32 tabTextScale = 0.6f;
+    // glow behind the cookie (drawn before the cookie).
+    f32 cookieGlowScale = 2.6f;      // glow diameter / cookie diameter
 
-    // screen 2: content panel -----------------------------------------------
-    i32 contentPadX = 8;            // horizontal padding inside the content area
-    i32 contentTitleY = 6;          // panel title baseline below the screen top
-    f32 contentTitleScale = 0.7f;   // Kavoon heading ("BUILDINGS", "STORE", "MENU")
-    u32 contentTitleColor = 0xFFFFFFFF;
-    u32 screenBgColor = 0x1E1E24FF; // screen background
-    u32 bezelColor = 0x101014FF;    // bezel gap between the two screens
+    // --- middle panel (center) ---------------------------------------------
+    // Game world view between the cookie panel and the store panel.
+    // A cookie strip (building sprites) runs horizontally near the top,
+    // with a green grass field beneath it.
+    i32 middleCookieStripY = 128;    // top of the cookie-sprite strip
+    i32 middleCookieStripH = 48;     // height of the sprite strip
+    i32 middleGrassY = 180;          // top of the green grass field
 
-    // rows shared by the Buildings and Store panels
-    i32 rowH = 30;
-    i32 rowGap = 2;
-    i32 rowIconSize = 24;
-    i32 rowIconX = 6;
-    f32 rowNameScale = 0.5f;
-    u32 rowNameColor = 0xFFFFFFFF;
-    u32 rowNameColorLocked = 0x8A8A8AFF;
-    f32 rowPriceScale = 0.5f;
-    u32 rowPriceColorAfford = 0x6FFF6FFF;
-    u32 rowPriceColorNot = 0xFF6666FF;
-    u32 rowLockedColor = 0x353535FF;   // locked-item silhouette
-    u32 rowOwnedColor = 0xC8C8C8FF;    // "xN" owned count
-    u32 rowBgColor = 0x26262CFF;       // row background
-    u32 rowHighlightColor = 0x3A3A45FF; // buyable row background
+    // --- store panel (right) ----------------------------------------------
+    // Panel width is a fraction of the window, matching the real game
+    // (store column ~16% of width). Store content (tile, icon, text) is
+    // scaled at draw time by storeW / 304 (the real store panel width in px)
+    // so everything fits and stays proportional.
+    f32 storePanelWidthFraction = 0.158f;
 
-    // menu (Options / Stats / Info)
-    f32 menuTextScale = 0.55f;
-    u32 menuTextColor = 0xE0E0E0FF;
-    i32 menuItemH = 28;
-    u32 menuItemBg = 0x26262CFF;
-    u32 checkboxOn = 0xFFD700FF;
-    u32 checkboxOff = 0x4A4A4AFF;
+    // Base sizes mirror the real game's store column (~304px wide at 1920px
+    // window width). These are scaled by storeW/304 at draw time.
+    i32 storeTitleX = 16;
+    i32 storeTitleY = 44;
+    f32 storeTitleScale = 1.7f;      // Kavoon heading "STORE"
+    u32 storeTitleColor = 0xFFFFFFFF;
 
-    // scroll arrows (top-right / bottom-right of the content area)
-    i32 arrowW = 20;
-    i32 arrowH = 20;
-    f32 arrowTextScale = 0.7f;
-    u32 arrowColor = 0xC8C8C8FF;
-    u32 arrowColorDisabled = 0x4A4A4AFF;
+    // Upgrades row (icon slots) beneath the STORE title.
+    i32 upgradesY = 96;
+    i32 upgradeSlotW = 40;
+    i32 upgradeSlotH = 40;
+    i32 upgradeSlotGap = 8;
+    i32 upgradeSlotX = 16;
 
-    // toasts: stacked upward from the bottom-left of screen 1
-    f32 toastX = 8.0f;
-    f32 toastSpacing = 24.0f;
-    f32 toastScale = 0.6f;
-    f32 toastLife = 4.0f;
-    u32 toastColor = 0xFFFFFFFF;
-    u32 toastBgColor = 0x000000B0;
+    // Buy / Sell toggle beneath the upgrades row.
+    i32 buySellY = 150;
+    i32 buySellH = 26;
+    i32 buySellW = 94;
+    u32 buySellColor = 0xFFFFFFFF;
+    u32 buySellActive = 0xFFD700FF;
+
+    // Bulk labels "1 / 10 / 100" to the right of the Buy/Sell toggle.
+    i32 bulkY = 150;
+    f32 bulkScale = 0.8f;
+    u32 bulkColor = 0xFFFFFF66;
+    i32 bulkGap = 10;
+
+    // Store rows: contiguous (no separation between elements), no frames.
+    i32 storeFirstRowY = 198;        // first row top (below buy/sell)
+    i32 storeRowHeight = 64;         // row height == row step (contiguous)
+    i32 storeTileWidth = 300;        // storeTile.png strip width (base px)
+    i32 storeTileStripHeight = 64;   // one strip height
+
+    i32 storeIconX = 0;              // icon x relative to storeX (left edge of row cell)
+    i32 storeIconSize = 64;          // icon fills the row height (base px)
+
+    i32 storeNameX = 76;             // name x (64px icon + gap) (base px)
+    f32 storeNameScale = 1.15f;
+    u32 storeNameColorEnabled = 0xFFFFFFFF;
+    u32 storeNameColorDisabled = 0x888888FF;
+
+    // Price stacked below the name, with a small cookie icon before it.
+    f32 storePriceScale = 0.9f;
+    u32 storePriceColorAffordable = 0x6FFF6FFF;
+    u32 storePriceColorNot = 0xFF6666FF;
+    i32 storePriceIconGap = 6;
+
+    // Big faded owned amount on the right.
+    i32 storeOwnedRightMargin = 14;
+    f32 storeOwnedScale = 1.5f;
+    u32 storeOwnedColor = 0x00000066;
+
+    // Locked item silhouette (dark shadowed).
+    u32 storeLockedColor = 0x303030FF;
+
+    // --- colours -----------------------------------------------------------
+    u32 bandColor = 0x3A3A4AFF;
+    u32 tileColorEnabled = 0xFFFFFFFF;
+    u32 tileColorDisabled = 0x555555FF;
+
+    // Grass field colour (middle panel bottom).
+    u32 grassColor = 0x7FC94FFF;
+
+    // --- toasts (skeleton) --------------------------------------------------
+    f32 toastX = 16.0f;                  // toast area left edge (inside cookie panel)
+    f32 toastYStart = 0.0f;              // set at draw time: bottom area of cookie panel
+    f32 toastSpacing = 26.0f;            // vertical gap between toasts
+    f32 toastScale = 0.8f;               // text scale
+    f32 toastLife = 4.0f;                // seconds each toast stays on screen
+    u32 toastColor = 0xFFFFFFFF;         // toast text color
+    u32 toastBgColor = 0x000000B0;       // toast background (semi-transparent dark)
 };
+
 
 class UI {
 public:
-    // Screen 2 tabs: Buildings / Store / Menu. Cookie has screen 1 to itself.
-    enum class ScreenTab : i32 { Buildings = 0, Store, Menu };
-
-    // Menus opened from the Menu tab. UI state only: Game knows nothing of it.
-    enum class MenuScreen : i32 { None, Options, Stats, Info };
-
     UI(const Game& game, Render& render, const Layout& layout = Layout());
     ~UI();
 
-    // Draw one frame: both DSi screens, cookie panel, tabbed view, toasts.
+    // Draw one frame: background, cookie panel, middle panel, store panel.
     void draw();
 
     // Update per-frame UI state (toast lifetimes, etc.). Called from the main
     // loop each fixed timestep.
     void update(f32 dt);
 
-    // Report a pointer click at (x, y) in window coordinates. Returns the game
-    // action the main loop should apply to Game. No hit-testing happens outside
-    // this class; UI-only input (tabs, scroll, menu picking) is handled here.
+    // Report a pointer click at (x, y). Returns the game action the main
+    // loop should apply to Game. No hit-testing happens outside this class.
     GameAction on_pointer(i32 x, i32 y);
 
-    // Queue a transient on-screen notification (toast).
+    // Queue a transient on-screen notification (toast). Skeleton: text +
+    // lifetime; styling/placement refined later.
     void notify(const std::string& text);
 
 private:
@@ -163,55 +221,24 @@ private:
     Render& render_;
     Layout layout_;
 
-    // screen 2 state (UI-only, never in Game)
-    ScreenTab tab_ = ScreenTab::Buildings;
-    MenuScreen menu_ = MenuScreen::None;
-    i32 scrollY_ = 0;      // screen 2 content scroll offset (px)
-    i32 maxScroll_ = 0;    // clamped scroll range, (re)computed at draw time
-
     // texture handles (lazily loaded on first draw)
+    i32 bgStripesTex = 0;
+    i32 vignetteTex = 0;
     i32 glowTex = 0;
     i32 cookieTex = 0;
+    i32 panelHorizTex = 0;
+    i32 panelVertTex = 0;
+    i32 storeTileTex = 0;
+    i32 priceCookieTex = 0;
 
     // building-icon texture cache (logical path -> handle)
     std::unordered_map<std::string, i32> iconTexCache;
 
-    // active toasts
+    // active toasts (skeleton)
     std::vector<Toast> toasts;
 
-    // menu rows drawn this frame (id 4000 + index); on_pointer uses them to
-    // interpret menu clicks consistently with what was drawn.
-    struct MenuRow {
-        i32 id = 0;
-        enum class Kind : i32 { Picker, Toggle, Action };
-        Kind kind = Kind::Picker;
-        i32 y = 0;            // absolute row top, before scrolling
-        std::string label;
-        std::string prefName; // Toggle only
-        GameAction::Type action = GameAction::Type::None; // Action only
-        bool value = false;   // Toggle current state
-    };
-    std::vector<MenuRow> menuRows_;
-
-    // geometry
-    i32 screenX() const;
-    i32 screen2Y() const;
-
-    // drawing helpers
-    void drawCookieScreen(i32 x0, i32 y0);
-    void drawTabScreen(i32 x0, i32 y0);
-    void drawTextCentered(i32 x0, i32 yc, i32 w, const char* text, u32 color,
-                          f32 scale, InternalFont font);
-    void drawArrow(i32 x, i32 y, bool on, const char* glyph);
-
-    // screen 2 content measurement / drawing
-    i32 contentHeight(i32 contentStart);          // content height below the title
-    i32 fillMenuRows(i32 contentStart);           // menu tab: fill menuRows_, return end y
-    void drawScreen2Content(i32 x0, i32 contentTop, i32 contentBottom,
-                            i32 contentRight, i32 padX, i32 rowW);
-
-    // menu row handling (returns a GameAction for toggle/save/wipe, None otherwise)
-    GameAction handleMenuRow(i32 index);
+    // cached ticker rect (set during draw, checked during on_pointer)
+    i32 tickerRectX = 0, tickerRectY = 0, tickerRectW = 0, tickerRectH = 0;
 
     i32 loadIcon(const std::string& iconPath);
 };
